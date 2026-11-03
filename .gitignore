@@ -1,0 +1,10 @@
+/server/peerdoor
+ios/**/.build/
+ios/Vendor/wireguard-apple/**/out/
+ios/Vendor/wireguard-apple/**/.tmp/
+*.xcuserstate
+xcuserdata/
+DerivedData/
+.DS_Store
+# Accidental Xcode plugin/spec caches under ios/
+ios/[0-9]*/
