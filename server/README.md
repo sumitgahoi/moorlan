@@ -1,7 +1,7 @@
-# PeerDoor Linux server
+# Moorlan Linux server
 
 Pair phones with an existing home WireGuard server over trusted-LAN HTTP.
-PeerDoor assigns individual tunnel addresses, writes its own marked config block,
+Moorlan assigns individual tunnel addresses, writes its own marked config block,
 and applies managed peers through Go's wgctrl library without restarting WireGuard.
 The [iPhone app](../ios/README.md) handles the client.
 
@@ -22,17 +22,19 @@ From the monorepo root:
 
 ```bash
 cd server
-go build -o peerdoor ./cmd/peerdoor
-sudo ./peerdoor
+go build -o moorlan ./cmd/moorlan
+sudo ./moorlan
 # DDNS or an externally forwarded port different from the WG listen port:
-sudo ./peerdoor -endpoint home.example.com:51820
+sudo ./moorlan -endpoint home.example.com:51820
 ```
 
 Options:
 
 - `-iface`: interface name, default `wg0`.
 - `-endpoint`: public WireGuard `host:port`; overrides STUN.
-- `--unjoin`: display an unjoin QR and expose DELETE only.
+- `--unpair`: display an unpair QR and expose DELETE only.
+- `--remove <key|label>`: remove a managed peer by WireGuard public key, or by
+  label when that label is unique, then exit.
 
 Advanced options:
 
@@ -43,7 +45,7 @@ Advanced options:
 Without `-endpoint`, STUN discovers a public IPv4 address, combined with the
 WireGuard listen port. The router must forward that same UDP port. Use `-endpoint`
 for DDNS or a different external port. Discovery failure requires an override;
-PeerDoor never advertises the LAN address as the public VPN endpoint.
+Moorlan never advertises the LAN address as the public VPN endpoint.
 
 Startup acquires one interface lock, opens SQLite, and repairs the managed block
 and managed live peers before displaying a QR. The process stays up until Ctrl-C.
@@ -51,10 +53,10 @@ Multiple devices can scan the same QR and retry requests.
 
 ## Protocol and trust
 
-The version 3 pairing QR contains only protocol/discovery information:
+The version 1 pairing QR contains only protocol/discovery information:
 
 ```json
-{"v":3,"pair_url":"http://192.168.1.10:8756/v1/pair","server_public_key":"<server-key>"}
+{"v":1,"pair_url":"http://192.168.1.10:8756/v1/pair","server_public_key":"<server-key>"}
 ```
 
 There is no invitation token or expiry. **Anyone who can reach the service can
@@ -63,34 +65,39 @@ with trusted users/devices; stop it afterward. HTTP is intentional for this scop
 The QR server key lets the app check the returned identity; it does not authenticate
 HTTP traffic or establish an encrypted control channel.
 
-`POST /v1/pair` accepts `{ "public_key": "<device-key>" }`. Its response contains
-the assigned `/32`, tunnel/LAN routing prefixes, server public key, public endpoint,
-LAN, MTU, keepalive and an HMAC unjoin credential. Responses are constructed from
-current settings, not stored. The same key gets the same committed assignment on
-retry. Pairing QR versions 1 and 2 are unsupported; update app and server together.
-The existing unjoin QR format remains version 2.
+`POST /v1/pair` JSON is `{ "public_key": "<device-key>", "label": "iPhone" }`.
+The label is the phone's device name (admin hint only; duplicates are allowed)
+and is returned in the lease. The response also contains the assigned `/32`,
+tunnel/LAN routing prefixes, server public key, public endpoint, LAN, MTU,
+keepalive and a plaintext HMAC `unpair_token`. Responses are constructed from
+current settings, not stored. The same key gets the same committed assignment
+on retry and can refresh its label. Unsupported QR versions fail explicitly;
+update app and server together. The unpair QR is also version 1.
 
 ## Managed configuration and allocation
 
-SQLite lives next to the config: `wg0.conf.peerdoor.db`. It stores only managed
-public-key/address assignments, the server's public identity, and temporary pending
-removals. Config and database files are owner-only (`0600`). The database contains
-no server private key. Do not delete it or back it up independently of the config.
+SQLite lives next to the config: `wg0.conf.moorlan.db`. It stores managed
+public-key/address/label assignments, the server's public identity, and temporary
+pending removals. Config and database files are owner-only (`0600`). The database
+contains no server private key. Do not delete it or back it up independently of
+the config.
 
-Only this block is generated, sorted by peer public key:
+Only this block is generated, sorted by peer public key. Labels are rendered as
+comments for operators reading the file; SQLite remains authoritative:
 
 ```ini
-### PEERDOOR PEERS ###
+### MOORLAN PEERS ###
 [Peer]
+# iPhone 17
 PublicKey = <device-key>
 AllowedIPs = 10.8.0.2/32
 
-### END PEERDOOR PEERS ###
+### END MOORLAN PEERS ###
 ```
 
 Everything outside the block is preserved byte for byte. Existing peers stay
-unmanaged: their keys cannot be enrolled or removed by PeerDoor. This also applies
-to peers created outside a marked block by older PeerDoor versions; their existing
+unmanaged: their keys cannot be enrolled or removed by Moorlan. This also applies
+to peers created outside a marked block by older Moorlan versions; their existing
 VPN profiles still work, but removal requires normal WireGuard administration.
 There is no automatic migration/adoption of existing peers.
 
@@ -100,13 +107,13 @@ covered by saved or live existing peer routes. Existing `/28` or other routed
 ranges reserve the whole overlapping range. IPv6 and routes outside the tunnel
 pool do not consume IPv4 pool addresses. A full pool gives an explicit error.
 Only phones with one `/32` each are enrolled; there is no per-device IP input or
-pool override. A successful unjoin releases that device's allocation for reuse.
+pool override. A successful unpair releases that device's allocation for reuse.
 
 ## Changes, retries, and recovery
 
 SQLite is authoritative for managed peers. One process-lifetime interface lock
-(`/run/peerdoor-<iface>.lock`) prevents other PeerDoor processes from managing it.
-One operation mutex serializes pairing, unjoin and reconciliation.
+(`/run/moorlan-<iface>.lock`) prevents other Moorlan processes from managing it.
+One operation mutex serializes pairing, unpair and reconciliation.
 
 Pairing commits an assignment, renders and atomically saves the block using a
 private temporary file, then applies managed peers with wgctrl. Success is returned
@@ -114,7 +121,7 @@ only after saving and applying succeed. A failed save/apply does not roll back t
 assignment: retry uses the same address and finishes the operation. Unchanged live
 peers are skipped; unmanaged peers are never replaced or removed.
 
-Unjoin deletes the assignment and records a pending removal in one SQLite
+Unpair deletes the assignment and records a pending removal in one SQLite
 transaction. It regenerates the block, removes the live peer, and clears the pending
 removal only after success. Repeated DELETEs are safe. The short removal journal
 lets startup finish deletion even if the process crashed after removing its config
@@ -127,27 +134,42 @@ If the database is missing while the block contains peers, startup fails instead
 of erasing them. Restore the database and config together. No whole-interface
 `wg-quick save`, per-request backup, rollback, or interface restart is used.
 
-## Unjoin
+## Unpair
+
+Phone-initiated (device still present):
 
 ```bash
-sudo ./peerdoor --unjoin
+sudo ./moorlan --unpair
 ```
 
 On home Wi-Fi, choose **Delete profile** in the app, scan this QR, and confirm.
 The public QR identifies the server and current LAN URL. The phone sends
-`DELETE /v1/pair` with its public key and saved `unjoin_token`. Only an HTTP 204
+`DELETE /v1/pair` with its public key and saved `unpair_token`. Only an HTTP 204
 acknowledgement permits local profile deletion. Failures retain the phone profile
 and credential so the user can retry. This mode skips endpoint/STUN discovery.
 
 The credential is a per-peer HMAC derived from the server WireGuard private key.
 It survives restarts; rotating that key is unsupported with the existing database.
-Trusted users can request an existing managed key's pairing response, including its
-unjoin credential: public keys are not proof of private-key ownership. This API
-intentionally relies on trusted users while enrollment is open.
+
+Admin-initiated (lost device):
+
+```bash
+sudo ./moorlan --remove <device-public-key>
+# or, when the device name is unique among managed peers:
+sudo ./moorlan --remove "Kitchen iPhone"
+```
+
+Read the managed conf block (label comment + `PublicKey`) to pick the right
+peer. This deletes the SQLite assignment, regenerates the managed block, removes
+the live peer, and exits. No phone or HMAC is required. A non-unique label
+fails with an error asking for the public key instead.
+
+Enrollment of new keys while pairing is running remains open on the trusted LAN;
+stop the process when finished.
 
 ## Routing prerequisites
 
-PeerDoor does not create interfaces, routes, forwarding, NAT, or firewall rules.
+Moorlan does not create interfaces, routes, forwarding, NAT, or firewall rules.
 Use an existing working WireGuard installation. The interface route must already
 cover the tunnel pool. LAN access needs forwarding and return routes; exit mode
 also needs Internet routing/NAT and firewall rules. Pairing success does not test
@@ -163,17 +185,17 @@ VPN reachability, forwarding or DNS.
   subnet and exit mode are separate routing choices and remain supported.
 - Do not manually change the managed block/database, move managed peers outside
   the block, change the server key or tunnel subnet, or run other configuration
-  tools concurrently. PeerDoor does not coordinate with external tools. Existing
+  tools concurrently. Moorlan does not coordinate with external tools. Existing
   peers outside the block remain admin-owned; unapplied external file edits are
-  not applied by PeerDoor. Keep `SaveConfig=true` disabled.
+  not applied by Moorlan. Keep `SaveConfig=true` disabled.
 - SQLite, disk config and live WireGuard cannot change in one transaction. Failed
-  operations may leave them temporarily different until retry/startup. PeerDoor
+  operations may leave them temporarily different until retry/startup. Moorlan
   repairs only while running; there is no background daemon or database-loss
-  recovery. Back up config and database together while PeerDoor is stopped.
+  recovery. Back up config and database together while Moorlan is stopped.
 - No STUN NAT traversal, UPnP, relay, CGNAT bypass or external-port discovery.
-- Trusted-LAN HTTP only. No public control API, invitation authentication or
-  proof of device private-key ownership. Deletion requires reachable home LAN;
-  there is no offline deletion queue.
+- Trusted-LAN HTTP only. No public control API or invitation authentication.
+  Proof of private-key ownership is not required for first enrollment. Deletion
+  requires reachable home LAN; there is no offline deletion queue.
 - Regular config files only; symlinks are unsupported. The complete config cannot
   be reconstructed if deleted. A lost SQLite database requires operator recovery.
 
@@ -182,7 +204,16 @@ VPN reachability, forwarding or DNS.
 ```bash
 go test -race ./...
 go vet ./...
-go build -o peerdoor ./cmd/peerdoor
+go build -o moorlan ./cmd/moorlan
 ```
+
+Pushing a `v*` tag runs `.github/workflows/server-release.yml`: Linux
+`amd64`/`arm64` binaries (and SHA-256 checksums) are attached to a GitHub
+Release. Manual workflow runs build and test without publishing.
+
+Existing PeerDoor installs: conf markers `### PEERDOOR PEERS ###` are still
+read; the next save rewrites them as `### MOORLAN PEERS ###`. The database file
+is renamed from `*.peerdoor.db` to `*.moorlan.db` on first open. Re-pair phones
+after upgrading so they receive a new `unpair_token` (HMAC domain changed).
 
 SQLite uses the pure-Go modernc driver; Linux cross-compilation needs no C compiler.

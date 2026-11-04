@@ -1,0 +1,92 @@
+name: Server release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+defaults:
+  run:
+    working-directory: server
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+      - name: Test
+        run: |
+          go vet ./...
+          go test -race ./...
+
+  build:
+    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          out="moorlan-${GOOS}-${GOARCH}"
+          go build -trimpath -ldflags="-s -w" -o "${out}" ./cmd/moorlan
+          sha256sum "${out}" > "${out}.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: moorlan-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            server/moorlan-${{ matrix.goos }}-${{ matrix.goarch }}
+            server/moorlan-${{ matrix.goos }}-${{ matrix.goarch }}.sha256
+          if-no-files-found: error
+
+  release:
+    name: GitHub Release
+    needs: build
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: moorlan-linux-*
+          merge-multiple: true
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          shopt -s nullglob
+          assets=(dist/moorlan-linux-*)
+          if [ ${#assets[@]} -eq 0 ]; then
+            echo "no release assets found" >&2
+            exit 1
+          fi
+          gh release create "${GITHUB_REF_NAME}" \
+            "${assets[@]}" \
+            --title "Moorlan server ${GITHUB_REF_NAME}" \
+            --generate-notes \
+            --verify-tag

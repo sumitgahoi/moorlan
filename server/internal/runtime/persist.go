@@ -8,16 +8,16 @@ import (
 	"syscall"
 )
 
-// LockInterface is held by main until process shutdown, so pairing and unjoin
-// cannot race another PeerDoor process, even with different config paths/ports.
+// LockInterface is held by main until process shutdown, so pairing and unpair
+// cannot race another Moorlan process, even with different config paths/ports.
 func LockInterface(name string) (func(), error) {
 	if !validInterfaceName(name) {
 		return nil, fmt.Errorf("invalid WireGuard interface name")
 	}
 	if runtime.GOOS != "linux" {
-		return nil, fmt.Errorf("PeerDoor server requires Linux")
+		return nil, fmt.Errorf("Moorlan server requires Linux")
 	}
-	return lockFile(filepath.Join("/run", "peerdoor-"+name+".lock"))
+	return lockFile(filepath.Join("/run", "moorlan-"+name+".lock"))
 }
 func validInterfaceName(name string) bool {
 	if len(name) == 0 || len(name) > 15 || name == "." || name == ".." {
@@ -37,7 +37,7 @@ func lockFile(path string) (func(), error) {
 	}
 	if err = syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		file.Close()
-		return nil, fmt.Errorf("another PeerDoor process is already using this interface: %w", err)
+		return nil, fmt.Errorf("another Moorlan process is already using this interface: %w", err)
 	}
 	return func() { _ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN); _ = file.Close() }, nil
 }

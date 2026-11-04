@@ -1,6 +1,6 @@
-# PeerDoor iPhone app
+# Moorlan iPhone app
 
-An iOS 17+ app and Packet Tunnel extension for the [PeerDoor Linux server](../server/README.md).
+An iOS 17+ app and Packet Tunnel extension for the [Moorlan Linux server](../server/README.md).
 WireGuardKit owns the WireGuard backend, typed configurations, IP ranges, endpoint
 parsing and packet-tunnel adapter. The app does not implement cryptography,
 packet forwarding, or a wg-quick parser.
@@ -13,21 +13,21 @@ vendored WireGuardKit Go bridge. From the monorepo root:
 ```bash
 cd ios
 xcodegen generate
-open PeerDoor.xcodeproj
+open Moorlan.xcodeproj
 ```
 
 Set your development team in `project.yml` (`DEVELOPMENT_TEAM`) or both Xcode
 application/extension targets. Use matching provisioning profiles with:
 
 - Network Extensions: Packet Tunnel Provider.
-- App Groups: `group.app.peerdoor`, on app and extension.
+- App Groups: `group.app.moorlan`, on app and extension.
 - Access Wi-Fi Information, on app and extension.
-- Shared Keychain group: `<AppIdentifierPrefix>app.peerdoor.shared`.
-- The app also retains its original `<AppIdentifierPrefix>app.peerdoor.ios`
+- Shared Keychain group: `<AppIdentifierPrefix>app.moorlan.shared`.
+- The app also retains its original `<AppIdentifierPrefix>app.moorlan.ios`
   Keychain group to migrate identities from older versions.
 
 The entitlement files contain these capabilities and are referenced by
-`project.yml`; regenerating the project preserves them. `PeerDoorKeychainAccessGroup`
+`project.yml`; regenerating the project preserves them. `MoorlanKeychainAccessGroup`
 in each Info.plist expands to the shared group for the selected signing team.
 If changing bundle identifiers/groups, update project settings, entitlement files,
 Info.plist keychain-group entries, and `Shared/AppIdentity.swift` together.
@@ -40,10 +40,10 @@ the supported validation path here.
 
 ## Pair and create a profile
 
-1. Start `peerdoor` on the server with its existing WireGuard interface up.
+1. Start `moorlan` on the server with its existing WireGuard interface up.
 2. Join the server's home Wi-Fi and tap **Start QR scan** / the scanner icon.
 3. Allow **Camera** when asked. If denied, the camera alert offers **Open Settings**.
-4. Scan the server's version 3 pairing QR. The actual connection to its LAN URL
+4. Scan the server's version 1 pairing QR. The actual connection to its LAN URL
    triggers **Local Network** access. Allow it; denial and reachability errors keep
    the QR retryable and offer Settings recovery.
 5. Approve Apple's **Add VPN Configurations** prompt. The app installs a distinct
@@ -61,7 +61,7 @@ See [Apple's Local Network privacy guidance](https://developer.apple.com/documen
 
 ### HTTP pairing and App Transport Security
 
-The pairing/unjoin service intentionally uses HTTP on the trusted home LAN and
+The pairing/unpair service intentionally uses HTTP on the trusted home LAN and
 its QR contains a dynamic numeric IP address. The app's `NSAppTransportSecurity`
 dictionary therefore sets `NSAllowsArbitraryLoads = YES`. Do **not** add
 `NSAllowsLocalNetworking` alongside it: on modern iOS, the presence of that key
@@ -75,19 +75,19 @@ restarting the Linux server cannot change them.
 
 ### QR version mismatch
 
-Pairing now uses QR version 3 (LAN URL and server key, no invitation token).
-Unjoin retains QR version 2. A version 1 or 2 pairing QR usually
-means an old Linux binary is still running. Update the Linux server source and
-rebuild it from `server/`, stop the old process, then explicitly run the new binary:
+Pairing and unpair use QR protocol version 1 (LAN URL and server key). A
+mismatched QR version usually means an old Linux binary is still running.
+Update the Linux server source and rebuild it from `server/`, stop the old
+process, then explicitly run the new binary:
 
 ```bash
-cd /path/to/peerdoor/server
-go build -o peerdoor ./cmd/peerdoor
-sudo ./peerdoor
+cd /path/to/moorlan/server
+go build -o moorlan ./cmd/moorlan
+sudo ./moorlan
 ```
 
 Scan the newly printed QR, not a previous screenshot. For deletion, start the
-new binary with `--unjoin` instead. Updating the iPhone app alone does not upgrade
+new binary with `--unpair` instead. Updating the iPhone app alone does not upgrade
 the server or change a QR already printed by an older process.
 
 ## Routes and exit node
@@ -142,23 +142,46 @@ best-effort convenience: overlapping private subnets can look like home.
 
 ## Delete a profile from both ends
 
-On the Linux host, start `peerdoor --unjoin`. On home Wi-Fi, select **Settings →
-Paired host → Delete profile** and scan its public unjoin QR (the main scanner also
+On the Linux host, start `moorlan --unpair`. On home Wi-Fi, select **Settings →
+Paired host → Delete profile** and scan its public unpair QR (the main scanner also
 accepts it). Confirm the named saved host.
 
+At pair time the app sends `UIDevice.current.name` as a server-side label for
+conf comments and optional admin `--remove` when that name is unique.
+
 The app matches the server public key, contacts the **current scanned LAN URL**,
-and supplies the saved per-peer HMAC credential. After HTTP 204, it removes only
+and supplies the saved per-peer HMAC credential in the DELETE body. After
+HTTP 204, it removes only
 that host's native VPN profile, its extension settings and saved host/lease.
 The shared Keychain identity remains because other hosts may use it. A network,
 server-save/apply or local profile-cleanup failure retains the pairing/credential for
 retry. Unknown servers are rejected and there is no offline deletion queue.
-Old pairings without an unjoin credential need to pair again first.
+Old pairings without an unpair credential need to pair again first.
+
+## UI
+
+The SwiftUI shell matches Cove and Glance: Apple's native components and Human
+Interface Guidelines are the design system. Prefer system typography, semantic
+colors (`primary` / `secondary` / `Color.accentColor`), SF Symbols, standard
+navigation, inset grouped lists/forms, sheets, and controls. Do not add a custom
+theme, fonts, status orb, glass panels, or forced dark chrome unless there is a
+documented functional need.
+
+| Screen | Pattern |
+| --- | --- |
+| Home | `NavigationStack` + inset grouped `List`: status hero, profile menu, detail rows, Exit toggle, Connect |
+| Empty pairing | `ContentUnavailableView` with a bordered-prominent scan action |
+| Settings | System `Form` sheet (policy, trusted Wi‑Fi, paired host) |
+| Scanner | System sheet; camera preview only where needed; light/dark follows the device |
+
+Visual language for connection status uses system green / accent / orange /
+secondary rather than branded gradients.
 
 ## Storage and implementation
 
-- `PeerDoor/`: SwiftUI screens, AVFoundation scanner, native profile management,
+- `Moorlan/`: SwiftUI screens, AVFoundation scanner, native profile management,
   real LAN permission checks, CoreLocation/NEHotspotNetwork Wi-Fi access.
-- `PeerDoorCore/`: Codable protocol models, URLSession pairing/deletion, routing
+- `MoorlanCore/`: Codable protocol models, URLSession pairing/deletion, routing
   policy, physical network classification, profile store and Keychain identity.
 - `PacketTunnel/`: NEPacketTunnelProvider and WireGuardAdapter; policy remains active
   outside the foreground app.
@@ -176,13 +199,13 @@ in the app's saved host record. No new VPN or wg-quick parser is implemented.
 From the monorepo root:
 
 ```bash
-swift test --package-path ios/PeerDoorCore
-xcodebuild -project ios/PeerDoor.xcodeproj -scheme PeerDoor \
+swift test --package-path ios/MoorlanCore
+xcodebuild -project ios/Moorlan.xcodeproj -scheme Moorlan \
   -sdk iphoneos -destination 'generic/platform=iOS' \
-  -derivedDataPath /tmp/peerdoor-build CODE_SIGNING_ALLOWED=NO build
+  -derivedDataPath /tmp/moorlan-build CODE_SIGNING_ALLOWED=NO build
 ```
 
-Core tests cover pairing/unjoin QR dispatch, target matching, failed/offline
+Core tests cover pairing/unpair QR dispatch, target matching, failed/offline
 requests, routing defaults/overrides, default-route removal in split mode,
 legacy trust migration, profile-data secrecy and IPv4 subnet boundaries. Physical
 device permission dialogs, signing, native profile installation, actual forwarding,
@@ -208,14 +231,14 @@ DNS, background roaming and hairpin transitions still require a device/network t
   the app/Connect. Unconditional always-on behavior on every network is unsupported.
 - Home-LAN classification is a physical IPv4 subnet check. Away networks reusing
   the same private subnet as home are unsupported for automatic classification.
-- Deletion is confirmed on the reachable home LAN using the server's unjoin QR;
+- Deletion is confirmed on the reachable home LAN using the server's unpair QR;
   there is no offline deletion queue or delete-over-VPN acknowledgement protocol.
 - Pairing QR versions 1 and 2 are unsupported. Update app and server together.
   Stored legacy records can be read,
   but must be re-paired against the current server to obtain a deletion credential.
 
 Enrollment is open to any trusted LAN user while the server process is running.
-The app checks the returned server key against the scanned version 3 QR. This is
+The app checks the returned server key against the scanned version 1 QR. This is
 an identity consistency check, not authentication of the HTTP transport. Server
 peers from older versions outside the managed block remain unmanaged; the tool
 will not adopt or delete them. See the server README for migration limitations.

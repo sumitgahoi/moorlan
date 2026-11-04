@@ -7,12 +7,14 @@ import (
 	"sort"
 	"strings"
 
-	"peerdoor/internal/iface"
-	"peerdoor/internal/payload"
+	"moorlan/internal/iface"
+	"moorlan/internal/payload"
 )
 
-const blockStart = "### PEERDOOR PEERS ###"
-const blockEnd = "### END PEERDOOR PEERS ###"
+const blockStart = "### MOORLAN PEERS ###"
+const blockEnd = "### END MOORLAN PEERS ###"
+const legacyBlockStart = "### PEERDOOR PEERS ###"
+const legacyBlockEnd = "### END PEERDOOR PEERS ###"
 
 type configFile struct {
 	before, after string
@@ -41,14 +43,14 @@ func parseConfig(raw string) (configFile, error) {
 	offset := 0
 	for _, line := range strings.SplitAfter(raw, "\n") {
 		switch strings.TrimSpace(line) {
-		case blockStart:
+		case blockStart, legacyBlockStart:
 			if start >= 0 {
-				return configFile{}, fmt.Errorf("duplicate PeerDoor start marker")
+				return configFile{}, fmt.Errorf("duplicate Moorlan start marker")
 			}
 			start = offset
-		case blockEnd:
+		case blockEnd, legacyBlockEnd:
 			if end >= 0 {
-				return configFile{}, fmt.Errorf("duplicate PeerDoor end marker")
+				return configFile{}, fmt.Errorf("duplicate Moorlan end marker")
 			}
 			end = offset
 			afterEnd = offset + len(line)
@@ -58,7 +60,7 @@ func parseConfig(raw string) (configFile, error) {
 	c := configFile{before: raw}
 	if start >= 0 || end >= 0 {
 		if start < 0 || end < start {
-			return configFile{}, fmt.Errorf("incomplete or reversed PeerDoor markers")
+			return configFile{}, fmt.Errorf("incomplete or reversed Moorlan markers")
 		}
 		c.before, c.after, c.hasBlock = raw[:start], raw[afterEnd:], true
 		var err error
@@ -80,7 +82,7 @@ func parseConfig(raw string) (configFile, error) {
 		}
 		key, value, ok := strings.Cut(line, "=")
 		if ok && section == "[interface]" && strings.EqualFold(strings.TrimSpace(key), "SaveConfig") && strings.EqualFold(strings.TrimSpace(value), "true") {
-			return configFile{}, fmt.Errorf("disable SaveConfig=true: PeerDoor owns its generated peer block")
+			return configFile{}, fmt.Errorf("disable SaveConfig=true: Moorlan owns its generated peer block")
 		}
 	}
 	if !hasInterface {
@@ -148,13 +150,17 @@ func (c configFile) render(peers []iface.Peer) []byte {
 	}
 	block.WriteString(blockStart + "\n")
 	for _, p := range peers {
-		fmt.Fprintf(&block, "[Peer]\nPublicKey = %s\nAllowedIPs = %s\n\n", p.PublicKey, strings.Join(p.AllowedIPs, ", "))
+		block.WriteString("[Peer]\n")
+		if p.Label != "" {
+			fmt.Fprintf(&block, "# %s\n", p.Label)
+		}
+		fmt.Fprintf(&block, "PublicKey = %s\nAllowedIPs = %s\n\n", p.PublicKey, strings.Join(p.AllowedIPs, ", "))
 	}
 	block.WriteString(blockEnd + "\n")
 	return []byte(c.before + block.String() + c.after)
 }
 func writeConfig(path string, raw []byte) error {
-	file, err := os.CreateTemp(filepath.Dir(path), ".peerdoor-config-*")
+	file, err := os.CreateTemp(filepath.Dir(path), ".moorlan-config-*")
 	if err != nil {
 		return err
 	}

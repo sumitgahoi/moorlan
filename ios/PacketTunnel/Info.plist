@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDisplayName</key>
-	<string>PeerDoor Tunnel</string>
+	<string>Moorlan Tunnel</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -23,7 +23,7 @@
 		<key>NSExtensionPrincipalClass</key>
 		<string>$(PRODUCT_MODULE_NAME).PacketTunnelProvider</string>
 	</dict>
-	<key>PeerDoorKeychainAccessGroup</key>
-	<string>$(AppIdentifierPrefix)app.peerdoor.shared</string>
+	<key>MoorlanKeychainAccessGroup</key>
+	<string>$(AppIdentifierPrefix)app.moorlan.shared</string>
 </dict>
 </plist>

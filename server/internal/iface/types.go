@@ -4,6 +4,7 @@ package iface
 type Peer struct {
 	PublicKey  string
 	AllowedIPs []string
+	Label      string
 }
 
 // Snapshot contains only public interface information.

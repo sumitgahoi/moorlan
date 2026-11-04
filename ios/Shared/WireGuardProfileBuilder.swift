@@ -1,6 +1,6 @@
 import Foundation
 import WireGuardKit
-import PeerDoorCore
+import MoorlanCore
 
 /// WireGuardKit owns key parsing, endpoint parsing, IP ranges, and tunnel setup.
 enum WireGuardProfileBuilder {
@@ -9,7 +9,7 @@ enum WireGuardProfileBuilder {
               let address = IPAddressRange(from: profile.lease.address),
               let publicKey = PublicKey(base64Key: profile.lease.publicKey),
               let text = profile.lease.endpoint, let endpoint = Endpoint(from: text) else {
-            throw PeerDoorError.tunnelFailed("Invalid WireGuard profile")
+            throw MoorlanError.tunnelFailed("Invalid WireGuard profile")
         }
         var interface = InterfaceConfiguration(privateKey: key)
         interface.addresses = [address]
@@ -19,7 +19,7 @@ enum WireGuardProfileBuilder {
         peer.endpoint = endpoint
         peer.persistentKeepAlive = UInt16(exactly: profile.lease.persistentKeepalive ?? 25)
         peer.allowedIPs = try profile.policy.allowedIPs(lease: profile.lease, fullTunnel: fullTunnel).map {
-            guard let range = IPAddressRange(from: $0) else { throw PeerDoorError.tunnelFailed("Invalid route \($0)") }
+            guard let range = IPAddressRange(from: $0) else { throw MoorlanError.tunnelFailed("Invalid route \($0)") }
             return range
         }
         return TunnelConfiguration(name: profile.name, interface: interface, peers: [peer])

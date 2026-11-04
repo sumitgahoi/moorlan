@@ -1,4 +1,4 @@
-module peerdoor
+module moorlan
 
 go 1.23
 

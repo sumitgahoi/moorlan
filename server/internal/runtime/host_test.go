@@ -5,7 +5,7 @@ import (
 	"net"
 	"testing"
 
-	"peerdoor/internal/iface"
+	"moorlan/internal/iface"
 )
 
 func TestSelectLANFollowsRouteInsteadOfDockerBridge(t *testing.T) {
@@ -45,7 +45,7 @@ func TestSelectLANMultipleAddresses(t *testing.T) {
 	}
 }
 
-func TestUnjoinDiscoveryDoesNotRequirePoolOrListeningPort(t *testing.T) {
+func TestUnpairDiscoveryDoesNotRequirePoolOrListeningPort(t *testing.T) {
 	device := &wgtypes.Device{PublicKey: wgtypes.Key{1}}
 	if err := validateInterface(device, []string{"10.8.0.1/32"}, false); err != nil {
 		t.Fatal(err)
@@ -56,7 +56,7 @@ func TestUnjoinDiscoveryDoesNotRequirePoolOrListeningPort(t *testing.T) {
 	}
 	device.PublicKey = wgtypes.Key{}
 	if err := validateInterface(device, nil, false); err == nil {
-		t.Fatal("unjoin needs an existing server identity")
+		t.Fatal("unpair needs an existing server identity")
 	}
 }
 

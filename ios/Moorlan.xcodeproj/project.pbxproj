@@ -1,0 +1,654 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		08575C0BA2D6DE3D80F09024 /* PacketTunnelProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2FF5CA8C286912565D4D2B5A /* PacketTunnelProvider.swift */; };
+		0AF475AC7D1E66819BB6DCC9 /* MoorlanApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 059A0BCEE175CFDB16E228D2 /* MoorlanApp.swift */; };
+		0D6E17339DC919FA9655CD1F /* ScannerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 927E98A1CB2BAD5029341EA4 /* ScannerSheet.swift */; };
+		11909FA21FDC257F18198468 /* WiFiIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB4FA0606C1213E683370B7A /* WiFiIdentity.swift */; };
+		1AD0C874B53B9517D4F285B0 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = DFAEA05CC56709EDEBE419B0 /* Assets.xcassets */; };
+		2BF667F87D2D50507B1DB21D /* MoorlanCore in Frameworks */ = {isa = PBXBuildFile; productRef = 7AA63E122F8FC16D75D37858 /* MoorlanCore */; };
+		3C5FF91BC2AC73B99649503F /* WireGuardProfileBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D44DABE92EC65365EB9EBA2 /* WireGuardProfileBuilder.swift */; };
+		464523A4552483DCADE253A5 /* EmptyPairingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56856E25F169EAC01DFBE7E1 /* EmptyPairingView.swift */; };
+		4DAEF986F2EBC00F9FEAFB66 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F6241D5FB94DB4189AF8A3A /* RootView.swift */; };
+		51DF22839D24399C982B6E4B /* AppIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = C80F8D0E668C80CB47D6F320 /* AppIdentity.swift */; };
+		79AC1D8E8008A537F9437017 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E00EF2632F4EEEEA70010AEF /* SettingsView.swift */; };
+		8060BFE4C866E9EAA06871E9 /* MoorlanCore in Frameworks */ = {isa = PBXBuildFile; productRef = 4F1B3E68D6F90EBA4768D7F1 /* MoorlanCore */; };
+		8B2DE4BE275F71079CA00DFF /* LocalNetworkAuthorization.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9490B66EE95FE4F7CA598AA4 /* LocalNetworkAuthorization.swift */; };
+		8CA4E20467690C4773C0BF54 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDD9E60C864FCFC32AD9FE47 /* HomeView.swift */; };
+		8CE219DCEB2CB92AA2AF9046 /* TunnelManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4873F05F0A090D4EDD8313EB /* TunnelManager.swift */; };
+		CBC7B93110C12B4BD006D8B6 /* AppIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = C80F8D0E668C80CB47D6F320 /* AppIdentity.swift */; };
+		CBCB43E779FCAB8D69CDDF2F /* PacketTunnel.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 94FD78BE59569680E3923D50 /* PacketTunnel.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		D0B7D617CE4F55B70E58600C /* WireGuardKit in Frameworks */ = {isa = PBXBuildFile; productRef = C76B551ACF97D202D1CDA971 /* WireGuardKit */; };
+		E24FF04E5B07736C61F8FC35 /* WireGuardProfileBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D44DABE92EC65365EB9EBA2 /* WireGuardProfileBuilder.swift */; };
+		ED8325F271C6C039BD82BC60 /* WireGuardKit in Frameworks */ = {isa = PBXBuildFile; productRef = 10E7711CCB59347AB4DA3C14 /* WireGuardKit */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		AC481885032C04F47C7DB733 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F646F4EBDCB5FA0CC8BCAE37 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = F8CE1661D594925AA9740C35;
+			remoteInfo = PacketTunnel;
+		};
+		DAB435339830943521FC7A36 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F646F4EBDCB5FA0CC8BCAE37 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 182B0BF05E7ED7DDD1A7A7BD;
+			remoteInfo = WireGuardGoBridgeiOS;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		86D4046DF77CCCBAC7032FA8 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				CBCB43E779FCAB8D69CDDF2F /* PacketTunnel.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		059A0BCEE175CFDB16E228D2 /* MoorlanApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoorlanApp.swift; sourceTree = "<group>"; };
+		16C3CEA93B96777FD8406F78 /* wireguard-apple */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "wireguard-apple"; path = "Vendor/wireguard-apple"; sourceTree = SOURCE_ROOT; };
+		2FF5CA8C286912565D4D2B5A /* PacketTunnelProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PacketTunnelProvider.swift; sourceTree = "<group>"; };
+		435081AE7AF90DFAFB0F30CD /* PacketTunnel.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PacketTunnel.entitlements; sourceTree = "<group>"; };
+		4873F05F0A090D4EDD8313EB /* TunnelManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TunnelManager.swift; sourceTree = "<group>"; };
+		4D44DABE92EC65365EB9EBA2 /* WireGuardProfileBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WireGuardProfileBuilder.swift; sourceTree = "<group>"; };
+		56856E25F169EAC01DFBE7E1 /* EmptyPairingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyPairingView.swift; sourceTree = "<group>"; };
+		788C047941F1E6786D5CBFE7 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		927E98A1CB2BAD5029341EA4 /* ScannerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScannerSheet.swift; sourceTree = "<group>"; };
+		9490B66EE95FE4F7CA598AA4 /* LocalNetworkAuthorization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalNetworkAuthorization.swift; sourceTree = "<group>"; };
+		94FD78BE59569680E3923D50 /* PacketTunnel.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = PacketTunnel.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		9F6241D5FB94DB4189AF8A3A /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		A62A972449AE2E2E7654EFC0 /* Moorlan.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Moorlan.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		C78FB1B62ACA07DB85F22C0A /* Moorlan.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Moorlan.entitlements; sourceTree = "<group>"; };
+		C80F8D0E668C80CB47D6F320 /* AppIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIdentity.swift; sourceTree = "<group>"; };
+		CAE55EF2ED41A8CAB35AE3B4 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		CB446A3098F4BCC33D53B8EF /* MoorlanCore */ = {isa = PBXFileReference; lastKnownFileType = folder; path = MoorlanCore; sourceTree = SOURCE_ROOT; };
+		DDD9E60C864FCFC32AD9FE47 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
+		DFAEA05CC56709EDEBE419B0 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		E00EF2632F4EEEEA70010AEF /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		FB4FA0606C1213E683370B7A /* WiFiIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WiFiIdentity.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		2A00C77127BEC6964ACDE138 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				2BF667F87D2D50507B1DB21D /* MoorlanCore in Frameworks */,
+				D0B7D617CE4F55B70E58600C /* WireGuardKit in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		78FEAC9844F80F6351BE9893 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8060BFE4C866E9EAA06871E9 /* MoorlanCore in Frameworks */,
+				ED8325F271C6C039BD82BC60 /* WireGuardKit in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		012A8A93A2264953BBEC81BA /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				C80F8D0E668C80CB47D6F320 /* AppIdentity.swift */,
+				4D44DABE92EC65365EB9EBA2 /* WireGuardProfileBuilder.swift */,
+			);
+			path = Shared;
+			sourceTree = "<group>";
+		};
+		046696F7706FD2F324349BF8 /* Moorlan */ = {
+			isa = PBXGroup;
+			children = (
+				DFAEA05CC56709EDEBE419B0 /* Assets.xcassets */,
+				56856E25F169EAC01DFBE7E1 /* EmptyPairingView.swift */,
+				DDD9E60C864FCFC32AD9FE47 /* HomeView.swift */,
+				CAE55EF2ED41A8CAB35AE3B4 /* Info.plist */,
+				9490B66EE95FE4F7CA598AA4 /* LocalNetworkAuthorization.swift */,
+				C78FB1B62ACA07DB85F22C0A /* Moorlan.entitlements */,
+				059A0BCEE175CFDB16E228D2 /* MoorlanApp.swift */,
+				9F6241D5FB94DB4189AF8A3A /* RootView.swift */,
+				927E98A1CB2BAD5029341EA4 /* ScannerSheet.swift */,
+				E00EF2632F4EEEEA70010AEF /* SettingsView.swift */,
+				4873F05F0A090D4EDD8313EB /* TunnelManager.swift */,
+				FB4FA0606C1213E683370B7A /* WiFiIdentity.swift */,
+			);
+			path = Moorlan;
+			sourceTree = "<group>";
+		};
+		110BE2E84FFCBA7C9791E837 /* PacketTunnel */ = {
+			isa = PBXGroup;
+			children = (
+				788C047941F1E6786D5CBFE7 /* Info.plist */,
+				435081AE7AF90DFAFB0F30CD /* PacketTunnel.entitlements */,
+				2FF5CA8C286912565D4D2B5A /* PacketTunnelProvider.swift */,
+			);
+			path = PacketTunnel;
+			sourceTree = "<group>";
+		};
+		251F307E4297C75CB378C8EE /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A62A972449AE2E2E7654EFC0 /* Moorlan.app */,
+				94FD78BE59569680E3923D50 /* PacketTunnel.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		463C186D363F23BA165F21EA /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				CB446A3098F4BCC33D53B8EF /* MoorlanCore */,
+				16C3CEA93B96777FD8406F78 /* wireguard-apple */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
+		616DDC381C836AC059626A02 = {
+			isa = PBXGroup;
+			children = (
+				046696F7706FD2F324349BF8 /* Moorlan */,
+				463C186D363F23BA165F21EA /* Packages */,
+				110BE2E84FFCBA7C9791E837 /* PacketTunnel */,
+				012A8A93A2264953BBEC81BA /* Shared */,
+				251F307E4297C75CB378C8EE /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXLegacyTarget section */
+		182B0BF05E7ED7DDD1A7A7BD /* WireGuardGoBridgeiOS */ = {
+			isa = PBXLegacyTarget;
+			buildArgumentsString = "$(ACTION)";
+			buildConfigurationList = 61E2A09E1787D1DC93E1723E /* Build configuration list for PBXLegacyTarget "WireGuardGoBridgeiOS" */;
+			buildPhases = (
+				23DA18281C5AE7052C0A8158 /* Sources */,
+			);
+			buildToolPath = /usr/bin/make;
+			buildWorkingDirectory = "$(PROJECT_DIR)/Vendor/wireguard-apple/Sources/WireGuardKitGo";
+			dependencies = (
+			);
+			name = WireGuardGoBridgeiOS;
+			packageProductDependencies = (
+			);
+			passBuildSettingsInEnvironment = 1;
+			productName = WireGuardGoBridgeiOS;
+		};
+/* End PBXLegacyTarget section */
+
+/* Begin PBXNativeTarget section */
+		0EC4952E09340A84106C500B /* Moorlan */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 05228E0FBC487ED01806BB44 /* Build configuration list for PBXNativeTarget "Moorlan" */;
+			buildPhases = (
+				BDA4391C821038B5206368F3 /* Sources */,
+				B5D6B8E2D64A7B84603E0C82 /* Resources */,
+				78FEAC9844F80F6351BE9893 /* Frameworks */,
+				86D4046DF77CCCBAC7032FA8 /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				F08F592F4116A69DAB9E6736 /* PBXTargetDependency */,
+			);
+			name = Moorlan;
+			packageProductDependencies = (
+				4F1B3E68D6F90EBA4768D7F1 /* MoorlanCore */,
+				10E7711CCB59347AB4DA3C14 /* WireGuardKit */,
+			);
+			productName = Moorlan;
+			productReference = A62A972449AE2E2E7654EFC0 /* Moorlan.app */;
+			productType = "com.apple.product-type.application";
+		};
+		F8CE1661D594925AA9740C35 /* PacketTunnel */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D95CBD2EDE09373E2C53CC12 /* Build configuration list for PBXNativeTarget "PacketTunnel" */;
+			buildPhases = (
+				C6FE2B2E93606B182947B8B0 /* Sources */,
+				2A00C77127BEC6964ACDE138 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				C92540605F48E4D87745D004 /* PBXTargetDependency */,
+			);
+			name = PacketTunnel;
+			packageProductDependencies = (
+				7AA63E122F8FC16D75D37858 /* MoorlanCore */,
+				C76B551ACF97D202D1CDA971 /* WireGuardKit */,
+			);
+			productName = PacketTunnel;
+			productReference = 94FD78BE59569680E3923D50 /* PacketTunnel.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		F646F4EBDCB5FA0CC8BCAE37 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					182B0BF05E7ED7DDD1A7A7BD = {
+						DevelopmentTeam = "";
+					};
+				};
+			};
+			buildConfigurationList = 6F71BA9755C0B951607EE219 /* Build configuration list for PBXProject "Moorlan" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 616DDC381C836AC059626A02;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				B6D1437B52F992A0D1580E74 /* XCLocalSwiftPackageReference "MoorlanCore" */,
+				F2ABB7A455FAD95D1F8509D1 /* XCLocalSwiftPackageReference "Vendor/wireguard-apple" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 251F307E4297C75CB378C8EE /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				182B0BF05E7ED7DDD1A7A7BD /* WireGuardGoBridgeiOS */,
+				F8CE1661D594925AA9740C35 /* PacketTunnel */,
+				0EC4952E09340A84106C500B /* Moorlan */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		B5D6B8E2D64A7B84603E0C82 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1AD0C874B53B9517D4F285B0 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		23DA18281C5AE7052C0A8158 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		BDA4391C821038B5206368F3 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CBC7B93110C12B4BD006D8B6 /* AppIdentity.swift in Sources */,
+				464523A4552483DCADE253A5 /* EmptyPairingView.swift in Sources */,
+				8CA4E20467690C4773C0BF54 /* HomeView.swift in Sources */,
+				8B2DE4BE275F71079CA00DFF /* LocalNetworkAuthorization.swift in Sources */,
+				0AF475AC7D1E66819BB6DCC9 /* MoorlanApp.swift in Sources */,
+				4DAEF986F2EBC00F9FEAFB66 /* RootView.swift in Sources */,
+				0D6E17339DC919FA9655CD1F /* ScannerSheet.swift in Sources */,
+				79AC1D8E8008A537F9437017 /* SettingsView.swift in Sources */,
+				8CE219DCEB2CB92AA2AF9046 /* TunnelManager.swift in Sources */,
+				11909FA21FDC257F18198468 /* WiFiIdentity.swift in Sources */,
+				3C5FF91BC2AC73B99649503F /* WireGuardProfileBuilder.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C6FE2B2E93606B182947B8B0 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				51DF22839D24399C982B6E4B /* AppIdentity.swift in Sources */,
+				08575C0BA2D6DE3D80F09024 /* PacketTunnelProvider.swift in Sources */,
+				E24FF04E5B07736C61F8FC35 /* WireGuardProfileBuilder.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		C92540605F48E4D87745D004 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 182B0BF05E7ED7DDD1A7A7BD /* WireGuardGoBridgeiOS */;
+			targetProxy = DAB435339830943521FC7A36 /* PBXContainerItemProxy */;
+		};
+		F08F592F4116A69DAB9E6736 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = F8CE1661D594925AA9740C35 /* PacketTunnel */;
+			targetProxy = AC481885032C04F47C7DB733 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		11DFB4BDC1490F6985642119 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = "";
+				ENABLE_BITCODE = NO;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		21359F175BEA213B209BB95B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_BITCODE = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		5EB0EA983B95E0A341D975B3 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = PacketTunnel/PacketTunnel.entitlements;
+				DEVELOPMENT_TEAM = 4X2R5KVD7F;
+				INFOPLIST_FILE = PacketTunnel/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = app.moorlan.ios.tunnel;
+				PRODUCT_NAME = PacketTunnel;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited)";
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		690FC87851B7B325C04D81B5 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PATH = "$(PATH):/opt/homebrew/bin:/usr/local/bin";
+				PRODUCT_BUNDLE_IDENTIFIER = app.moorlan.WireGuardGoBridgeiOS;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		6A1EA8CFD40C40DD54A9982B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PATH = "$(PATH):/opt/homebrew/bin:/usr/local/bin";
+				PRODUCT_BUNDLE_IDENTIFIER = app.moorlan.WireGuardGoBridgeiOS;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A1B0B2F542BE1903081AB598 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = PacketTunnel/PacketTunnel.entitlements;
+				DEVELOPMENT_TEAM = 4X2R5KVD7F;
+				INFOPLIST_FILE = PacketTunnel/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = app.moorlan.ios.tunnel;
+				PRODUCT_NAME = PacketTunnel;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited)";
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		F125A5EB77D078EA6ACB2800 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Moorlan/Moorlan.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 4X2R5KVD7F;
+				INFOPLIST_FILE = Moorlan/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.moorlan.ios;
+				PRODUCT_NAME = Moorlan;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		FD292D209B042EFD6C96A743 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Moorlan/Moorlan.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 4X2R5KVD7F;
+				INFOPLIST_FILE = Moorlan/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.moorlan.ios;
+				PRODUCT_NAME = Moorlan;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		05228E0FBC487ED01806BB44 /* Build configuration list for PBXNativeTarget "Moorlan" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F125A5EB77D078EA6ACB2800 /* Debug */,
+				FD292D209B042EFD6C96A743 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		61E2A09E1787D1DC93E1723E /* Build configuration list for PBXLegacyTarget "WireGuardGoBridgeiOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				6A1EA8CFD40C40DD54A9982B /* Debug */,
+				690FC87851B7B325C04D81B5 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		6F71BA9755C0B951607EE219 /* Build configuration list for PBXProject "Moorlan" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				21359F175BEA213B209BB95B /* Debug */,
+				11DFB4BDC1490F6985642119 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		D95CBD2EDE09373E2C53CC12 /* Build configuration list for PBXNativeTarget "PacketTunnel" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5EB0EA983B95E0A341D975B3 /* Debug */,
+				A1B0B2F542BE1903081AB598 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		B6D1437B52F992A0D1580E74 /* XCLocalSwiftPackageReference "MoorlanCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = MoorlanCore;
+		};
+		F2ABB7A455FAD95D1F8509D1 /* XCLocalSwiftPackageReference "Vendor/wireguard-apple" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "Vendor/wireguard-apple";
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		10E7711CCB59347AB4DA3C14 /* WireGuardKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = WireGuardKit;
+		};
+		4F1B3E68D6F90EBA4768D7F1 /* MoorlanCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MoorlanCore;
+		};
+		7AA63E122F8FC16D75D37858 /* MoorlanCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MoorlanCore;
+		};
+		C76B551ACF97D202D1CDA971 /* WireGuardKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = WireGuardKit;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = F646F4EBDCB5FA0CC8BCAE37 /* Project object */;
+}

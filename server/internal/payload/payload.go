@@ -11,7 +11,7 @@ import (
 )
 
 // Card is a pairing invitation, not the VPN configuration.
-// Version 3 identifies the server without an invitation token.
+// Version 1 is the current pre-release protocol.
 type Card struct {
 	V               int    `json:"v"`
 	PairURL         string `json:"pair_url"`
@@ -36,7 +36,7 @@ func Parse(text string) (Card, error) {
 	return card, nil
 }
 func Validate(card Card) error {
-	if card.V != 3 {
+	if card.V != 1 {
 		return fmt.Errorf("unsupported QR version %d", card.V)
 	}
 	if err := validateControlURL(card.PairURL); err != nil {
@@ -60,40 +60,40 @@ func SplitEndpoint(endpoint string) (string, string, error) {
 	return host, port, nil
 }
 
-// UnjoinCard identifies a known host and its current LAN control URL. It carries
+// UnpairCard identifies a known host and its current LAN control URL. It carries
 // no credential: permission comes from the device's saved per-peer HMAC token.
-type UnjoinCard struct {
+type UnpairCard struct {
 	V               int    `json:"v"`
 	Action          string `json:"action"`
 	ServerPublicKey string `json:"server_public_key"`
-	UnjoinURL       string `json:"unjoin_url"`
+	UnpairURL       string `json:"unpair_url"`
 }
 
-func MarshalUnjoin(card UnjoinCard) (string, error) {
+func MarshalUnpair(card UnpairCard) (string, error) {
 	if err := card.Validate(); err != nil {
 		return "", err
 	}
 	raw, err := json.Marshal(card)
 	return string(raw), err
 }
-func ParseUnjoin(text string) (UnjoinCard, error) {
-	var card UnjoinCard
+func ParseUnpair(text string) (UnpairCard, error) {
+	var card UnpairCard
 	if err := json.Unmarshal([]byte(text), &card); err != nil {
-		return UnjoinCard{}, err
+		return UnpairCard{}, err
 	}
 	if err := card.Validate(); err != nil {
-		return UnjoinCard{}, err
+		return UnpairCard{}, err
 	}
 	return card, nil
 }
-func (card UnjoinCard) Validate() error {
-	if card.V != 2 || card.Action != "unjoin" {
-		return fmt.Errorf("unsupported unjoin QR version or action")
+func (card UnpairCard) Validate() error {
+	if card.V != 1 || card.Action != "unpair" {
+		return fmt.Errorf("unsupported unpair QR version or action")
 	}
 	if !ValidKey(card.ServerPublicKey) {
 		return fmt.Errorf("invalid server public key")
 	}
-	return validateControlURL(card.UnjoinURL)
+	return validateControlURL(card.UnpairURL)
 }
 func validateControlURL(value string) error {
 	control, err := url.Parse(value)

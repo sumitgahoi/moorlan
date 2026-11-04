@@ -9,7 +9,7 @@ import (
 
 	"golang.zx2c4.com/wireguard/wgctrl"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
-	"peerdoor/internal/iface"
+	"moorlan/internal/iface"
 )
 
 type Host struct {
@@ -25,14 +25,14 @@ func Discover(name, confPath, lanIface, endpoint string, pairPort int) (Host, er
 	return discover(name, confPath, lanIface, endpoint, pairPort, true)
 }
 
-// DiscoverUnjoin needs only the existing device, LAN, and save configuration.
-func DiscoverUnjoin(name, confPath, lanIface string, port int) (Host, error) {
+// DiscoverUnpair needs only the existing device, LAN, and save configuration.
+func DiscoverUnpair(name, confPath, lanIface string, port int) (Host, error) {
 	return discover(name, confPath, lanIface, "", port, false)
 }
 
 func discover(name, confPath, lanIface, endpoint string, pairPort int, pairing bool) (Host, error) {
 	if runtime.GOOS != "linux" {
-		return Host{}, fmt.Errorf("PeerDoor server requires Linux")
+		return Host{}, fmt.Errorf("Moorlan server requires Linux")
 	}
 	if !validInterfaceName(name) {
 		return Host{}, fmt.Errorf("invalid WireGuard interface name")

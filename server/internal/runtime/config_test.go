@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
-	"peerdoor/internal/iface"
+	"moorlan/internal/iface"
 )
 
 func TestRenderPreservesUnmanagedBytesAndIsDeterministic(t *testing.T) {
@@ -17,6 +17,10 @@ func TestRenderPreservesUnmanagedBytesAndIsDeterministic(t *testing.T) {
 	config, err := parseConfig(raw)
 	if err != nil {
 		t.Fatal(err)
+	}
+	legacy := before + legacyBlockStart + "\n" + legacyBlockEnd + "\n" + after
+	if _, err := parseConfig(legacy); err != nil {
+		t.Fatal("legacy PeerDoor markers rejected")
 	}
 	peers := []iface.Peer{{PublicKey: wgtypes.Key{4}.String(), AllowedIPs: []string{"10.8.0.3/32"}}, {PublicKey: wgtypes.Key{1}.String(), AllowedIPs: []string{"10.8.0.2/32"}}}
 	rendered := string(config.render(peers))
@@ -41,14 +45,14 @@ func TestMalformedMarkersAndSaveConfigAreRejected(t *testing.T) {
 }
 func TestSavedConfigIsPrivateAndMissingConfigIsNotReconstructed(t *testing.T) {
 	a, _, key := fixture(t)
-	if _, err := a.Assign(context.Background(), key.String()); err != nil {
+	if _, err := a.Assign(context.Background(), peerPub(key), "phone"); err != nil {
 		t.Fatal(err)
 	}
 	info, _ := os.Stat(a.Host.ConfPath)
 	if info.Mode().Perm() != 0600 {
 		t.Fatal(info.Mode())
 	}
-	info, _ = os.Stat(a.Host.ConfPath + ".peerdoor.db")
+	info, _ = os.Stat(a.Host.ConfPath + ".moorlan.db")
 	if info.Mode().Perm() != 0600 {
 		t.Fatal(info.Mode())
 	}

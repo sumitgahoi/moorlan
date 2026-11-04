@@ -4,14 +4,13 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"reflect"
 	"sync"
 
 	"golang.zx2c4.com/wireguard/wgctrl"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
-	"peerdoor/internal/iface"
-	"peerdoor/internal/pair"
-	"peerdoor/internal/payload"
+	"moorlan/internal/iface"
+	"moorlan/internal/pair"
+	"moorlan/internal/payload"
 )
 
 type wireguardClient interface {
@@ -33,7 +32,7 @@ func OpenAssigner(ctx context.Context, host Host) (*Assigner, error) {
 	if err != nil {
 		return nil, err
 	}
-	store, err := openStore(host.ConfPath+".peerdoor.db", host.Snap.PublicKey, config)
+	store, err := openStore(storePath(host.ConfPath), host.Snap.PublicKey, config)
 	if err != nil {
 		return nil, err
 	}
@@ -80,16 +79,16 @@ func (a *Assigner) reconcile(ctx context.Context, client wireguardClient) error 
 	external := peerKeys(config.external)
 	for _, p := range peers {
 		if external[p.PublicKey] {
-			return fmt.Errorf("managed peer also appears outside PeerDoor block")
+			return fmt.Errorf("managed peer also appears outside Moorlan block")
 		}
 	}
 	for _, key := range removals {
 		if external[key] {
-			return fmt.Errorf("cannot remove a peer outside PeerDoor block")
+			return fmt.Errorf("cannot remove a peer outside Moorlan block")
 		}
 	}
 	// Database entries must still fit the configured tunnel subnet. Changing the
-	// subnet behind PeerDoor is unsupported; fail rather than send a bad lease.
+	// subnet behind Moorlan is unsupported; fail rather than send a bad lease.
 	pool, err := iface.SelectPool(a.Host.Snap.Addresses)
 	if err != nil {
 		return err
@@ -107,7 +106,7 @@ func (a *Assigner) reconcile(ctx context.Context, client wireguardClient) error 
 		return err
 	}
 	if device.PublicKey.String() != a.Host.Snap.PublicKey {
-		return fmt.Errorf("WireGuard server identity changed; restart PeerDoor")
+		return fmt.Errorf("WireGuard server identity changed; restart Moorlan")
 	}
 	write := a.writeConfig
 	if write == nil {
@@ -140,7 +139,9 @@ func (a *Assigner) reconcile(ctx context.Context, client wireguardClient) error 
 			}
 		}
 		allowed := []net.IPNet{*network}
-		if existing != nil && reflect.DeepEqual(existing.AllowedIPs, allowed) {
+		// Compare via CIDR strings so 4-byte vs 16-byte IPv4 forms from the
+		// kernel and net.ParseCIDR do not force a needless ReplaceAllowedIPs.
+		if existing != nil && sameAllowedIPs(existing.AllowedIPs, allowed) {
 			continue
 		}
 		change := wgtypes.PeerConfig{PublicKey: key, AllowedIPs: allowed, ReplaceAllowedIPs: existing != nil}
@@ -159,12 +160,28 @@ func peerKeys(peers []iface.Peer) map[string]bool {
 	return out
 }
 
-func (a *Assigner) Assign(ctx context.Context, publicKey string) (pair.Lease, error) {
+func sameAllowedIPs(have, want []net.IPNet) bool {
+	if len(have) != len(want) {
+		return false
+	}
+	for i := range have {
+		if have[i].String() != want[i].String() {
+			return false
+		}
+	}
+	return true
+}
+
+func (a *Assigner) Assign(ctx context.Context, publicKey, label string) (pair.Lease, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return pair.Lease{}, err
 	}
+	if err := payload.ValidateLabel(label); err != nil {
+		return pair.Lease{}, err
+	}
+	label = payload.NormalizeLabel(label)
 	key, err := wgtypes.ParseKey(publicKey)
 	if err != nil {
 		return pair.Lease{}, err
@@ -200,14 +217,18 @@ func (a *Assigner) Assign(ctx context.Context, publicKey string) (pair.Lease, er
 	}
 	managed := peerKeys(peers)
 	if peerKeys(config.external)[publicKey] {
-		return pair.Lease{}, fmt.Errorf("existing peer is outside PeerDoor management")
+		return pair.Lease{}, fmt.Errorf("existing peer is outside Moorlan management")
 	}
 	for _, p := range device.Peers {
 		if p.PublicKey == key && !managed[publicKey] {
-			return pair.Lease{}, fmt.Errorf("existing live peer is outside PeerDoor management")
+			return pair.Lease{}, fmt.Errorf("existing live peer is outside Moorlan management")
 		}
 	}
 	pool, err := iface.SelectPool(a.Host.Snap.Addresses)
+	if err != nil {
+		return pair.Lease{}, err
+	}
+	credential, err := unpairCredential(device.PrivateKey, key)
 	if err != nil {
 		return pair.Lease{}, err
 	}
@@ -228,16 +249,14 @@ func (a *Assigner) Assign(ctx context.Context, publicKey string) (pair.Lease, er
 			return pair.Lease{}, err
 		}
 		address = iface.AddressString(ip)
-		if err = a.store.insert(ctx, publicKey, address); err != nil {
+		if err = a.store.insert(ctx, publicKey, address, label); err != nil {
 			return pair.Lease{}, fmt.Errorf("reserve address: %w", err)
 		}
+	} else if err = a.store.setLabel(ctx, publicKey, label); err != nil {
+		return pair.Lease{}, fmt.Errorf("update device label: %w", err)
 	}
 	if err = a.reconcile(ctx, client); err != nil {
 		return pair.Lease{}, err
 	}
-	credential, err := unjoinCredential(device.PrivateKey, key)
-	if err != nil {
-		return pair.Lease{}, err
-	}
-	return pair.Lease{Address: address, Prefixes: []string{pool.Network.String(), a.Host.LAN.CIDR}, LAN: a.Host.LAN.CIDR, PublicKey: device.PublicKey.String(), Endpoint: a.Host.Endpoint, MTU: a.Host.Snap.MTU, PersistentKeepalive: 25, UnjoinToken: credential}, nil
+	return pair.Lease{Address: address, Prefixes: []string{pool.Network.String(), a.Host.LAN.CIDR}, LAN: a.Host.LAN.CIDR, PublicKey: device.PublicKey.String(), Endpoint: a.Host.Endpoint, MTU: a.Host.Snap.MTU, PersistentKeepalive: 25, UnpairToken: credential, Label: label}, nil
 }

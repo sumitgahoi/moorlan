@@ -9,50 +9,54 @@ import (
 	"testing"
 
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
-	"peerdoor/internal/pair"
+	"moorlan/internal/pair"
 )
 
-func TestUnjoinCredentialIsStableAndPeerSpecific(t *testing.T) {
+func TestUnpairCredentialIsStableAndPeerSpecific(t *testing.T) {
 	a, client, key := fixture(t)
-	lease, err := a.Assign(context.Background(), key.String())
+	lease, err := a.Assign(context.Background(), peerPub(key), "phone")
 	if err != nil {
 		t.Fatal(err)
 	}
-	expected, _ := unjoinCredential(client.device.PrivateKey, key)
-	other, _ := unjoinCredential(client.device.PrivateKey, wgtypes.Key{8})
-	rotated, _ := unjoinCredential(wgtypes.Key{9}, key)
-	if expected != lease.UnjoinToken || len(expected) != 64 || other == expected || rotated == expected {
+	expected, _ := unpairCredential(client.device.PrivateKey, key.PublicKey())
+	other, _ := unpairCredential(client.device.PrivateKey, wgtypes.Key{8})
+	rotated, _ := unpairCredential(wgtypes.Key{9}, key.PublicKey())
+	if expected != lease.UnpairToken || len(expected) != 64 || other == expected || rotated == expected {
 		t.Fatal("invalid credential")
 	}
 }
-func TestUnjoinDeletesRecordAndIsRetryable(t *testing.T) {
+func TestUnpairDeletesRecordAndIsRetryable(t *testing.T) {
 	a, client, key := fixture(t)
-	lease, err := a.Assign(context.Background(), key.String())
+	lease, err := a.Assign(context.Background(), peerPub(key), "phone")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for i := 0; i < 2; i++ {
-		if err := a.Remove(context.Background(), key.String(), lease.UnjoinToken); err != nil {
+		if err := a.Remove(context.Background(), peerPub(key), lease.UnpairToken); err != nil {
 			t.Fatal(err)
 		}
 	}
 	rows, _ := a.store.list(context.Background())
 	pending, _ := a.store.pending(context.Background())
 	raw, _ := os.ReadFile(a.Host.ConfPath)
-	if len(rows) != 0 || len(pending) != 0 || len(client.device.Peers) != 0 || strings.Contains(string(raw), key.String()) {
+	if len(rows) != 0 || len(pending) != 0 || len(client.device.Peers) != 0 || strings.Contains(string(raw), peerPub(key)) {
 		t.Fatal("removal incomplete")
 	}
 	// A completed removal makes the address reusable.
-	next, err := a.Assign(context.Background(), wgtypes.Key{4}.String())
+	nextKey, err := wgtypes.GeneratePrivateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, err := a.Assign(context.Background(), peerPub(nextKey), "phone")
 	if err != nil || next.Address != lease.Address {
 		t.Fatalf("%+v %v", next, err)
 	}
 }
-func TestUnjoinFailureAndRestartCompleteDeletion(t *testing.T) {
+func TestUnpairFailureAndRestartCompleteDeletion(t *testing.T) {
 	for _, failure := range []string{"save", "apply"} {
 		t.Run(failure, func(t *testing.T) {
 			a, client, key := fixture(t)
-			lease, err := a.Assign(context.Background(), key.String())
+			lease, err := a.Assign(context.Background(), peerPub(key), "phone")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -61,7 +65,7 @@ func TestUnjoinFailureAndRestartCompleteDeletion(t *testing.T) {
 			} else {
 				client.configureErr = errors.New("device failure")
 			}
-			if err := a.Remove(context.Background(), key.String(), lease.UnjoinToken); err == nil {
+			if err := a.Remove(context.Background(), peerPub(key), lease.UnpairToken); err == nil {
 				t.Fatal("failure ignored")
 			}
 			rows, _ := a.store.list(context.Background())
@@ -72,7 +76,7 @@ func TestUnjoinFailureAndRestartCompleteDeletion(t *testing.T) {
 			// New process, same database: no client retry is needed to finish removal.
 			a.store.db.Close()
 			config, _ := readConfig(a.Host.ConfPath)
-			store, err := openStore(a.Host.ConfPath+".peerdoor.db", client.device.PublicKey.String(), config)
+			store, err := openStore(a.Host.ConfPath+".moorlan.db", client.device.PublicKey.String(), config)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -89,10 +93,10 @@ func TestUnjoinFailureAndRestartCompleteDeletion(t *testing.T) {
 		})
 	}
 }
-func TestWrongUnjoinCredentialDoesNotMutate(t *testing.T) {
+func TestWrongUnpairCredentialDoesNotMutate(t *testing.T) {
 	a, client, key := fixture(t)
 	before, _ := os.ReadFile(a.Host.ConfPath)
-	if err := a.Remove(context.Background(), key.String(), "wrong"); !errors.Is(err, pair.ErrUnauthorized) {
+	if err := a.Remove(context.Background(), peerPub(key), "wrong"); !errors.Is(err, pair.ErrUnauthorized) {
 		t.Fatal(err)
 	}
 	after, _ := os.ReadFile(a.Host.ConfPath)
@@ -102,16 +106,16 @@ func TestWrongUnjoinCredentialDoesNotMutate(t *testing.T) {
 	}
 }
 
-func TestUnjoinNeverRemovesUnmanagedPeers(t *testing.T) {
+func TestUnpairNeverRemovesUnmanagedPeers(t *testing.T) {
 	a, client, key := fixture(t)
 	_, network, _ := net.ParseCIDR("10.8.0.2/32")
-	client.device.Peers = []wgtypes.Peer{{PublicKey: key, AllowedIPs: []net.IPNet{*network}}}
-	credential, _ := unjoinCredential(client.device.PrivateKey, key)
+	client.device.Peers = []wgtypes.Peer{{PublicKey: key.PublicKey(), AllowedIPs: []net.IPNet{*network}}}
+	credential, _ := unpairCredential(client.device.PrivateKey, key.PublicKey())
 	for _, saved := range []bool{false, true} {
 		if saved {
-			os.WriteFile(a.Host.ConfPath, []byte("[Interface]\nPrivateKey = original-secret\n[Peer]\nPublicKey = "+key.String()+"\nAllowedIPs = 10.8.0.2/32\n"), 0600)
+			os.WriteFile(a.Host.ConfPath, []byte("[Interface]\nPrivateKey = original-secret\n[Peer]\nPublicKey = "+peerPub(key)+"\nAllowedIPs = 10.8.0.2/32\n"), 0600)
 		}
-		if err := a.Remove(context.Background(), key.String(), credential); err == nil {
+		if err := a.Remove(context.Background(), peerPub(key), credential); err == nil {
 			t.Fatal("removed unmanaged peer")
 		}
 	}

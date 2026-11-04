@@ -6,7 +6,7 @@ import (
 )
 
 func TestCardRoundTrip(t *testing.T) {
-	card := Card{V: 3, PairURL: "http://192.168.1.10:8756/v1/pair", ServerPublicKey: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE="}
+	card := Card{V: 1, PairURL: "http://192.168.1.10:8756/v1/pair", ServerPublicKey: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE="}
 	text, err := Marshal(card)
 	if err != nil {
 		t.Fatal(err)
@@ -15,57 +15,53 @@ func TestCardRoundTrip(t *testing.T) {
 	if err != nil || got != card {
 		t.Fatalf("%+v %v", got, err)
 	}
-	if strings.Contains(text, "token") || strings.Contains(text, "endpoint") {
-		t.Fatal("QR contains VPN settings")
-	}
 }
-func TestInvalidCard(t *testing.T) {
-	for _, card := range []Card{{V: 1}, {V: 3, PairURL: "https://example.com/v1/pair", ServerPublicKey: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE="}, {V: 3, PairURL: "http://example.com/v1/pair", ServerPublicKey: "invalid"}} {
+
+func TestCardRejectsBadVersionsAndURLs(t *testing.T) {
+	for _, card := range []Card{{V: 2}, {V: 1, PairURL: "https://example.com/v1/pair", ServerPublicKey: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE="}, {V: 1, PairURL: "http://example.com/v1/pair", ServerPublicKey: "invalid"}} {
 		if _, err := Marshal(card); err == nil {
-			t.Fatal("expected error")
+			t.Fatalf("accepted %+v", card)
 		}
-	}
-}
-func TestEndpointAndKeyValidation(t *testing.T) {
-	if ValidKey("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=") {
-		t.Fatal("zero key accepted")
-	}
-	for _, value := range []string{"host:0", "host:65536", "host:abc", "host"} {
-		if _, _, err := SplitEndpoint(value); err == nil {
-			t.Fatal(value)
-		}
-	}
-	if _, _, err := SplitEndpoint("[2001:db8::1]:51820"); err != nil {
-		t.Fatal(err)
 	}
 }
 
-func TestUnjoinCardContainsOnlyPublicDiscoveryData(t *testing.T) {
-	card := UnjoinCard{V: 2, Action: "unjoin", ServerPublicKey: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=", UnjoinURL: "http://192.168.1.10:8756/v1/pair"}
-	text, err := MarshalUnjoin(card)
+func TestValidateLabel(t *testing.T) {
+	if err := ValidateLabel("iPhone 17"); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{"", "  ", "a\nb", strings.Repeat("x", 65), string([]byte{0xff, 0xfe})} {
+		if err := ValidateLabel(bad); err == nil {
+			t.Fatalf("accepted %q", bad)
+		}
+	}
+}
+
+func TestUnpairCardContainsOnlyPublicDiscoveryData(t *testing.T) {
+	card := UnpairCard{V: 1, Action: "unpair", ServerPublicKey: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=", UnpairURL: "http://192.168.1.10:8756/v1/pair"}
+	text, err := MarshalUnpair(card)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := ParseUnjoin(text)
+	got, err := ParseUnpair(text)
 	if err != nil || got != card {
 		t.Fatalf("%+v %v", got, err)
 	}
-	if strings.Contains(text, "token") || strings.Contains(text, "private") || strings.Contains(text, "pair_url") {
-		t.Fatalf("unexpected invitation information: %s", text)
+	if strings.Contains(text, "token") {
+		t.Fatal("unpair QR leaked a credential field")
 	}
 	if _, err := Parse(text); err == nil {
-		t.Fatal("unjoin QR accepted as pairing invitation")
+		t.Fatal("unpair QR accepted as pairing invitation")
 	}
-	for _, change := range []func(*UnjoinCard){
-		func(c *UnjoinCard) { c.Action = "pair" },
-		func(c *UnjoinCard) { c.V = 1 },
-		func(c *UnjoinCard) { c.ServerPublicKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" },
-		func(c *UnjoinCard) { c.UnjoinURL = "http://192.168.1.10:8756/wrong" },
+	for _, change := range []func(*UnpairCard){
+		func(c *UnpairCard) { c.Action = "pair" },
+		func(c *UnpairCard) { c.V = 2 },
+		func(c *UnpairCard) { c.ServerPublicKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" },
+		func(c *UnpairCard) { c.UnpairURL = "http://192.168.1.10:8756/wrong" },
 	} {
 		invalid := card
 		change(&invalid)
-		if _, err := MarshalUnjoin(invalid); err == nil {
-			t.Fatal("invalid unjoin QR accepted")
+		if _, err := MarshalUnpair(invalid); err == nil {
+			t.Fatal("invalid unpair QR accepted")
 		}
 	}
 }

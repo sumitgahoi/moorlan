@@ -16,7 +16,7 @@ type fakeAssigner struct {
 	err   error
 }
 
-func (f *fakeAssigner) Assign(context.Context, string) (Lease, error) {
+func (f *fakeAssigner) Assign(context.Context, string, string) (Lease, error) {
 	f.calls.Add(1)
 	return Lease{Address: "10.8.0.2/32"}, f.err
 }
@@ -26,7 +26,7 @@ func testKey(value byte) string {
 	raw[0] = value
 	return base64.StdEncoding.EncodeToString(raw)
 }
-func body(key string) string { return `{"public_key":"` + key + `"}` }
+func body(key string) string { return `{"public_key":"` + key + `","label":"phone"}` }
 func post(handler http.Handler, body string) int {
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest("POST", "/v1/pair", strings.NewReader(body)))
@@ -34,7 +34,7 @@ func post(handler http.Handler, body string) int {
 }
 func deletePeer(handler http.Handler, key, credential string) int {
 	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, httptest.NewRequest("DELETE", "/v1/pair", strings.NewReader(`{"public_key":"`+key+`","unjoin_token":"`+credential+`"}`)))
+	handler.ServeHTTP(response, httptest.NewRequest("DELETE", "/v1/pair", strings.NewReader(`{"public_key":"`+key+`","unpair_token":"`+credential+`"}`)))
 	return response.Code
 }
 func TestMultipleDevicesAndRetriesNeedNoInvitationToken(t *testing.T) {
@@ -70,7 +70,7 @@ func TestAssignmentFailureCanBeRetried(t *testing.T) {
 func TestRejectMalformedAndOversizedRequests(t *testing.T) {
 	assign := &fakeAssigner{}
 	handler := New(assign)
-	for _, request := range []string{`{`, body(testKey(1)) + `{}`, `{"extra":true}`, body(testKey(0)), body(strings.Repeat("a", 5000))} {
+	for _, request := range []string{`{`, body(testKey(1)) + `{}`, `{"extra":true}`, body(testKey(0)), body(strings.Repeat("a", 5000)), `{"public_key":"` + testKey(1) + `"}`, `{"public_key":"` + testKey(1) + `","label":""}`} {
 		if got := post(handler, request); got != 400 {
 			t.Fatal(got)
 		}
@@ -79,9 +79,9 @@ func TestRejectMalformedAndOversizedRequests(t *testing.T) {
 		t.Fatal("invalid request reached assignment")
 	}
 }
-func TestUnjoinCredentialsAndUnjoinOnlyMode(t *testing.T) {
+func TestUnpairCredentialsAndUnpairOnlyMode(t *testing.T) {
 	assign := &fakeAssigner{}
-	for _, handler := range []http.Handler{New(assign), NewUnjoinOnly(assign)} {
+	for _, handler := range []http.Handler{New(assign), NewUnpairOnly(assign)} {
 		if got := deletePeer(handler, testKey(1), "credential"); got != 204 {
 			t.Fatal(got)
 		}
@@ -98,7 +98,7 @@ func TestUnjoinCredentialsAndUnjoinOnlyMode(t *testing.T) {
 			t.Fatal(got)
 		}
 	}
-	if got := post(NewUnjoinOnly(assign), body(testKey(1))); got != 405 {
+	if got := post(NewUnpairOnly(assign), body(testKey(1))); got != 405 {
 		t.Fatal(got)
 	}
 }

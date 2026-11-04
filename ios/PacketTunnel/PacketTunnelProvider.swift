@@ -1,6 +1,6 @@
 import NetworkExtension
 import WireGuardKit
-import PeerDoorCore
+import MoorlanCore
 import Combine
 
 final class PacketTunnelProvider: NEPacketTunnelProvider {
@@ -47,7 +47,7 @@ private final class TunnelController {
     private var pending = false
     private var stopping = false
     private lazy var adapter = WireGuardAdapter(with: provider) { _, message in
-        NSLog("[PeerDoor WireGuard] %@", message)
+        NSLog("[Moorlan WireGuard] %@", message)
     }
     init(provider: PacketTunnelProvider) { self.provider = provider }
 
@@ -55,7 +55,7 @@ private final class TunnelController {
         guard let proto = provider.protocolConfiguration as? NETunnelProviderProtocol,
               let id = proto.providerConfiguration?["profileID"] as? String,
               let raw = UserDefaults(suiteName: AppIdentity.appGroup)?.data(forKey: TunnelProfile.storageKey(id)) else {
-            throw PeerDoorError.tunnelFailed("Open PeerDoor and select this profile to configure it")
+            throw MoorlanError.tunnelFailed("Open Moorlan and select this profile to configure it")
         }
         return try JSONDecoder().decode(TunnelProfile.self, from: raw)
     }
@@ -70,7 +70,7 @@ private final class TunnelController {
         }
         guard case .connect(let full) = profile.policy.decide(path: monitor.snapshot.kind) else {
             monitor.stop()
-            throw PeerDoorError.tunnelFailed("Already on the server LAN")
+            throw MoorlanError.tunnelFailed("Already on the server LAN")
         }
         guard !stopping else { throw CancellationError() }
         let config = try configuration(full: full)
@@ -88,7 +88,7 @@ private final class TunnelController {
     }
     private func configuration(full: Bool) throws -> TunnelConfiguration {
         guard let profile, let identity = try IdentityStore(accessGroup: AppIdentity.keychainAccessGroup).load() else {
-            throw PeerDoorError.missingIdentity
+            throw MoorlanError.missingIdentity
         }
         return try WireGuardProfileBuilder.build(profile, privateKey: identity.privateKey, fullTunnel: full)
     }

@@ -10,11 +10,11 @@
 	<true/>
 	<key>com.apple.security.application-groups</key>
 	<array>
-		<string>group.app.peerdoor</string>
+		<string>group.app.moorlan</string>
 	</array>
 	<key>keychain-access-groups</key>
 	<array>
-		<string>$(AppIdentifierPrefix)app.peerdoor.shared</string>
+		<string>$(AppIdentifierPrefix)app.moorlan.shared</string>
 	</array>
 </dict>
 </plist>

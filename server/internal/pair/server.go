@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"peerdoor/internal/payload"
+	"moorlan/internal/payload"
 )
 
 type Lease struct {
@@ -21,21 +21,25 @@ type Lease struct {
 	Endpoint            string   `json:"endpoint"`
 	MTU                 int      `json:"mtu,omitempty"`
 	PersistentKeepalive int      `json:"persistent_keepalive"`
-	UnjoinToken         string   `json:"unjoin_token"`
+	UnpairToken         string   `json:"unpair_token"`
+	Label               string   `json:"label"`
 }
+
 type Assigner interface {
-	Assign(context.Context, string) (Lease, error)
+	Assign(context.Context, string, string) (Lease, error)
 	Remove(context.Context, string, string) error
 }
 
-var ErrUnauthorized = errors.New("invalid unjoin credential")
+var ErrUnauthorized = errors.New("invalid unpair credential")
 
 type request struct {
 	PublicKey string `json:"public_key"`
+	Label     string `json:"label"`
 }
 
 // Enrollment is open to trusted LAN users for the lifetime of the process.
 // Assigner serializes mutations; the HTTP layer holds no additional mutex.
+// Bodies are plaintext JSON on the trusted LAN (see README LIMITATIONS).
 func New(assign Assigner) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/pair", func(w http.ResponseWriter, r *http.Request) {
@@ -55,9 +59,13 @@ func New(assign Assigner) http.Handler {
 			writeError(w, 400, "public key is not a WireGuard key")
 			return
 		}
+		if err := payload.ValidateLabel(body.Label); err != nil {
+			writeError(w, 400, err.Error())
+			return
+		}
 		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 		defer cancel()
-		lease, err := assign.Assign(ctx, key)
+		lease, err := assign.Assign(ctx, key, payload.NormalizeLabel(body.Label))
 		if err != nil {
 			log.Printf("pairing assignment failed: %v", err)
 			writeError(w, 500, "could not register peer; check server logs and retry")
@@ -66,27 +74,27 @@ func New(assign Assigner) http.Handler {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(lease)
 	})
-	mux.HandleFunc("DELETE /v1/pair", unjoinHandler(assign.Remove))
+	mux.HandleFunc("DELETE /v1/pair", unpairHandler(assign.Remove))
 	return mux
 }
 
-// NewUnjoinOnly never registers the enrollment route, even with a valid token.
-func NewUnjoinOnly(assign Assigner) http.Handler {
+// NewUnpairOnly never registers the enrollment route, even with a valid token.
+func NewUnpairOnly(assign Assigner) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("DELETE /v1/pair", unjoinHandler(assign.Remove))
+	mux.HandleFunc("DELETE /v1/pair", unpairHandler(assign.Remove))
 	return mux
 }
 
-func unjoinHandler(remove func(context.Context, string, string) error) http.HandlerFunc {
+func unpairHandler(remove func(context.Context, string, string) error) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			PublicKey   string `json:"public_key"`
-			UnjoinToken string `json:"unjoin_token"`
+			UnpairToken string `json:"unpair_token"`
 		}
 		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
 		dec.DisallowUnknownFields()
 		if err := dec.Decode(&body); err != nil {
-			writeError(w, 400, "unjoin request is not valid json")
+			writeError(w, 400, "unpair request is not valid json")
 			return
 		}
 		if err := dec.Decode(&struct{}{}); err != io.EOF {
@@ -94,15 +102,15 @@ func unjoinHandler(remove func(context.Context, string, string) error) http.Hand
 			return
 		}
 		key := strings.TrimSpace(body.PublicKey)
-		if !payload.ValidKey(key) || body.UnjoinToken == "" {
-			writeError(w, 400, "public key and unjoin credential are required")
+		if !payload.ValidKey(key) || body.UnpairToken == "" {
+			writeError(w, 400, "public key and unpair credential are required")
 			return
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 		defer cancel()
-		if err := remove(ctx, key, body.UnjoinToken); err != nil {
+		if err := remove(ctx, key, body.UnpairToken); err != nil {
 			if errors.Is(err, ErrUnauthorized) {
-				writeError(w, 403, "unjoin credential does not match")
+				writeError(w, 403, "unpair credential does not match")
 				return
 			}
 			log.Printf("peer removal failed: %v", err)
