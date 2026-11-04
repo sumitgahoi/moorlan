@@ -76,6 +76,9 @@ jobs:
           pattern: moorlan-linux-*
           merge-multiple: true
       - name: Publish release
+        # download-artifact writes to the workspace root; override the job-wide
+        # working-directory: server so we look in ./dist, not ./server/dist.
+        working-directory: .
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -83,6 +86,7 @@ jobs:
           assets=(dist/moorlan-linux-*)
           if [ ${#assets[@]} -eq 0 ]; then
             echo "no release assets found" >&2
+            ls -la dist >&2 || true
             exit 1
           fi
           gh release create "${GITHUB_REF_NAME}" \
