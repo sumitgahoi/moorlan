@@ -13,13 +13,13 @@ This monorepo contains two independent applications:
 On the Linux server:
 
 ```bash
-cd server
-go build -o moorlan ./cmd/moorlan
-cp moorlan.conf.example moorlan.conf   # set private-endpoint, home-cidrs, optional public-endpoint
-sudo ./moorlan
-# Or flags (override the file):
-sudo ./moorlan -private-endpoint 10.10.10.1:8756 -home-cidrs 10.10.0.0/16 -public-endpoint home.example.com:51820
+curl -fsSL https://raw.githubusercontent.com/sumitgahoi/moorlan/main/server/install.sh | sudo bash
+# Edit /opt/moorlan/moorlan.conf (private-endpoint, home-cidrs), then:
+sudo moorlan
 ```
+
+From source: `cd server && go build -o moorlan ./cmd/moorlan && sudo ./install.sh ./moorlan`.
+Flags still override the conf file when needed.
 
 On the iPhone, scan the QR on home Wi-Fi, allow Camera and Local Network, and
 approve Apple's VPN profile prompt. Add each home SSID in Settings so the tunnel
@@ -39,11 +39,10 @@ Settings restores network defaults. Home Wi‑Fi takes precedence in every mode.
 Add each home SSID in Settings (join it, then **Add**). Trust other Wi‑Fi names
 for split routing; unidentified Wi‑Fi stays untrusted.
 
-For deletion from the phone, run `sudo ./moorlan --unpair` (with `moorlan.conf`
-or the usual flags) in `server/`, choose **Delete profile** in the app, scan the
-unpair QR on home Wi-Fi, and confirm. The app retains its profile if the server
-cannot acknowledge deletion. For a lost phone, run
-`sudo ./moorlan --remove <device-public-key>` (or a unique device name). There is
+For deletion from the phone, run `sudo moorlan --unpair`, choose **Delete profile**
+in the app, scan the unpair QR on home Wi-Fi, and confirm. The app retains its
+profile if the server cannot acknowledge deletion. For a lost phone, run
+`sudo moorlan --remove <device-public-key>` (or a unique device name). There is
 no offline delete queue.
 
 WireGuardKit handles encryption, packet routing and native configuration. Apple's

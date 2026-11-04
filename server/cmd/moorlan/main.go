@@ -61,6 +61,9 @@ func run() error {
 	}
 	flag.Parse()
 	_ = config // registered for usage/-h; path was resolved from argv before Parse
+	if os.Geteuid() != 0 {
+		return fmt.Errorf("must run as root (try: sudo ./moorlan)")
+	}
 	if *unpair && *remove != "" {
 		return fmt.Errorf("use either --unpair or --remove, not both")
 	}

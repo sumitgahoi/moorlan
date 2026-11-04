@@ -16,26 +16,51 @@ The [iPhone app](../ios/README.md) handles the client.
 | Privileges | Root; config directory must be writable |
 | Phone address | Automatically allocated `/32`, such as `10.8.0.2/32` |
 
-## Run
+## Install
 
-From the monorepo root:
+On the WireGuard host (Linux amd64/arm64):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/sumitgahoi/moorlan/main/server/install.sh | sudo bash
+# Or from a checkout / release binary in the current directory:
+# sudo ./install.sh
+# sudo ./install.sh ./moorlan-linux-amd64
+```
+
+This installs:
+
+| Path | Purpose |
+| --- | --- |
+| `/opt/moorlan/moorlan` | Binary |
+| `/usr/local/bin/moorlan` | Symlink on `PATH` |
+| `/opt/moorlan/moorlan.conf` | Starter config (created only if missing) |
+
+Edit `private-endpoint` and `home-cidrs` in the conf, then:
+
+```bash
+sudo moorlan
+sudo moorlan --unpair
+sudo moorlan --remove "Kitchen iPhone"
+```
+
+## Run (from source)
 
 ```bash
 cd server
 go build -o moorlan ./cmd/moorlan
-cp moorlan.conf.example moorlan.conf   # edit private-endpoint / home-cidrs / public-endpoint
-sudo ./moorlan
-# Or pass flags (they override moorlan.conf):
-sudo ./moorlan -private-endpoint 10.10.10.1:8756 -home-cidrs 10.10.0.0/16
-# Or list exact VLAN prefixes:
-# sudo ./moorlan -private-endpoint 10.10.10.1:8756 -home-cidrs 10.10.10.0/24,10.10.20.0/24,10.10.30.0/24,10.10.40.0/24
+sudo ./install.sh ./moorlan   # or: cp moorlan.conf.example moorlan.conf && sudo ./moorlan
+# Flags override moorlan.conf:
+sudo moorlan -private-endpoint 10.10.10.1:8756 -home-cidrs 10.10.0.0/16
+# Exact VLAN prefixes:
+# sudo moorlan -home-cidrs 10.10.10.0/24,10.10.20.0/24,10.10.30.0/24,10.10.40.0/24
 # DDNS or an externally forwarded port different from the WG listen port:
-sudo ./moorlan -public-endpoint home.example.com:51820
+sudo moorlan -public-endpoint home.example.com:51820
 ```
 
-Static settings can live in `moorlan.conf` (`key = value`, `#` comments). Moorlan
-loads the first existing of `./moorlan.conf` or `<binary-dir>/moorlan.conf`, or
-an explicit `-config` path. See `moorlan.conf.example`.
+Static settings live in `moorlan.conf` (`key = value`, `#` comments). Moorlan loads
+the first existing of `./moorlan.conf` or `<binary-dir>/moorlan.conf` (so the
+`/opt/moorlan` install is picked up via the symlink), or an explicit `-config`
+path. See `moorlan.conf.example`.
 
 Options:
 
