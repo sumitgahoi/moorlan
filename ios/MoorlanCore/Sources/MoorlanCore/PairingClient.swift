@@ -14,7 +14,13 @@ public struct PairingClient: Sendable {
             "label": label
         ])
 
-        let (data, response) = try await session.data(for: request)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch {
+            throw LANReachability.mapTransportError(error, url: card.pairURL)
+        }
         guard let http = response as? HTTPURLResponse else {
             throw MoorlanError.pairingFailed("no HTTP response")
         }
@@ -48,7 +54,8 @@ public struct PairingClient: Sendable {
                 throw MoorlanError.unpairFailed("The scanned QR belongs to a different server")
             }
         }
-        var request = URLRequest(url: card?.unpairURL ?? server.card.pairURL)
+        let controlURL = card?.unpairURL ?? server.card.pairURL
+        var request = URLRequest(url: controlURL)
         request.httpMethod = "DELETE"
         request.timeoutInterval = 20
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -56,7 +63,13 @@ public struct PairingClient: Sendable {
             "public_key": publicKey,
             "unpair_token": credential
         ])
-        let (data, response) = try await session.data(for: request)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch {
+            throw LANReachability.mapTransportError(error, url: controlURL)
+        }
         guard let http = response as? HTTPURLResponse else {
             throw MoorlanError.unpairFailed("No HTTP response; local pairing kept")
         }

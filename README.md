@@ -16,7 +16,7 @@ On the Linux server, bring up WireGuard device `moorlan0` yourself, then:
 cd server && go build -o moorlan ./cmd/moorlan
 sudo ./moorlan --init  # first-time setup only, with no peers on the device
 sudo ./moorlan --rehydrate
-sudo ./moorlan -private-endpoint 10.10.10.1:8756 -home-cidrs 10.10.0.0/16
+sudo ./moorlan -private-endpoint 10.10.10.1:8756 -home-cidrs 10.10.0.0/24,10.10.10.0/24,10.10.20.0/24,10.10.30.0/24,10.10.40.0/24
 ```
 
 Or download a release binary. See [server/README.md](server/README.md).

@@ -33,8 +33,8 @@ sudo ./moorlan --init
 sudo ./moorlan --rehydrate
 
 # Enrollment (trusted LAN):
-sudo ./moorlan -private-endpoint 10.10.10.1:8756 -home-cidrs 10.10.0.0/16
-sudo ./moorlan --unpair -private-endpoint 10.10.10.1:8756 -home-cidrs 10.10.0.0/16
+sudo ./moorlan -private-endpoint 10.10.10.1:8756 -home-cidrs 10.10.0.0/24,10.10.10.0/24,10.10.20.0/24,10.10.30.0/24,10.10.40.0/24
+sudo ./moorlan --unpair -private-endpoint 10.10.10.1:8756
 sudo ./moorlan --remove '<device-public-key>'
 ```
 
@@ -42,8 +42,8 @@ Flags only (no config file). Options:
 
 - `-wg`: interface name, default `moorlan0` (must match `moorlan` + digits).
 - `-db`: SQLite path, default `/var/lib/moorlan/<wg>.db`.
-- `-private-endpoint`: LAN HTTP control `host:port` (required for pair/unpair).
-- `-home-cidrs`: private IPv4 CIDR(s) for split-tunnel routes when away (pair/unpair).
+- `-private-endpoint`: LAN HTTP control `host:port` (required for pair and `--unpair`).
+- `-home-cidrs`: private IPv4 CIDR(s) for split-tunnel routes when away (pairing only).
 - `-public-endpoint`: public WireGuard `host:port`; overrides STUN.
 - `--init`: create the database for an empty device, then exit. Refuses an existing file.
 - `--rehydrate`: apply SQLite peers to the live device and exit (boot path).

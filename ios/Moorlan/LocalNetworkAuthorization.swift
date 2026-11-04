@@ -13,9 +13,9 @@ final class LocalNetworkAuthorization {
 
     func ensureAccess(to url: URL) async throws {
         guard let host = url.host, let number = UInt16(exactly: url.port ?? 80), number > 0, let port = NWEndpoint.Port(rawValue: number) else {
-            throw MoorlanError.pairingFailed("Invalid LAN address")
+            throw MoorlanError.lanUnreachable("Invalid LAN address in the QR code.")
         }
-        finish(MoorlanError.pairingFailed("Another LAN request started"))
+        finish(MoorlanError.lanUnreachable("Another LAN request started; try again."))
         try await withCheckedThrowingContinuation { continuation in
             self.continuation = continuation
             let connection = NWConnection(host: NWEndpoint.Host(host), port: port, using: .tcp)
@@ -27,10 +27,12 @@ final class LocalNetworkAuthorization {
                     case .ready: self.finish(nil)
                     case .waiting:
                         if connection?.currentPath?.unsatisfiedReason == .localNetworkDenied {
-                            self.finish(MoorlanError.pairingFailed("Allow Local Network in iPhone Settings → Moorlan, then retry."))
+                            self.finish(MoorlanError.lanUnreachable(
+                                "Allow Local Network for Moorlan in iPhone Settings, then scan again."
+                            ))
                         }
                     case .failed:
-                        self.finish(MoorlanError.pairingFailed("Cannot reach the host. Check Local Network permission, home Wi-Fi, and that Moorlan is running."))
+                        self.finish(MoorlanError.lanUnreachable(LANReachability.unreachableMessage(for: url)))
                     default: break
                     }
                 }
@@ -39,14 +41,16 @@ final class LocalNetworkAuthorization {
                 guard path.unsatisfiedReason == .localNetworkDenied else { return }
                 Task { @MainActor in
                     guard let self, self.connection === connection else { return }
-                    self.finish(MoorlanError.pairingFailed("Allow Local Network in iPhone Settings → Moorlan, then retry."))
+                    self.finish(MoorlanError.lanUnreachable(
+                        "Allow Local Network for Moorlan in iPhone Settings, then scan again."
+                    ))
                 }
             }
             connection.start(queue: .main)
             timeout = Task { [weak self] in
                 try? await Task.sleep(nanoseconds: 30_000_000_000)
                 guard !Task.isCancelled else { return }
-                self?.finish(MoorlanError.pairingFailed("LAN connection timed out. Allow Local Network in Settings and check the server."))
+                self?.finish(MoorlanError.lanUnreachable(LANReachability.unreachableMessage(for: url)))
             }
         }
     }

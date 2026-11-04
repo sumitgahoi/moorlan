@@ -32,8 +32,8 @@ func run() error {
 	rehydrate := flag.Bool("rehydrate", false, "apply SQLite peers onto the live moorlanN device and exit")
 	wg := flag.String("wg", "moorlan0", "WireGuard interface (must be moorlan0, moorlan1, …)")
 	db := flag.String("db", "", "SQLite path (default /var/lib/moorlan/<wg>.db)")
-	privateEndpoint := flag.String("private-endpoint", "", "LAN HTTP control address host:port (required for pair/unpair)")
-	homeCIDRs := flag.String("home-cidrs", "", "home IPv4 CIDR(s) for split-tunnel routes when away (required for pair/unpair)")
+	privateEndpoint := flag.String("private-endpoint", "", "LAN HTTP control address host:port (required for pair and --unpair)")
+	homeCIDRs := flag.String("home-cidrs", "", "home IPv4 CIDR(s) for split-tunnel routes when away (required for pairing)")
 	publicEndpoint := flag.String("public-endpoint", "", "public WireGuard host:port; overrides STUN discovery (e.g. DDNS)")
 	flag.Usage = func() {
 		fmt.Fprintln(flag.CommandLine.Output(), "Usage: moorlan [-wg moorlan0] [-private-endpoint host:port] [-home-cidrs CIDR[,CIDR...]] [--init | --rehydrate | --unpair | --remove <pubkey>] [-public-endpoint host:port]\n\nOptions:")
@@ -106,7 +106,7 @@ func run() error {
 
 	var host runtime.Host
 	if *unpair {
-		host, err = runtime.DiscoverUnpair(*wg, *db, *privateEndpoint, *homeCIDRs)
+		host, err = runtime.DiscoverUnpair(*wg, *db, *privateEndpoint)
 	} else {
 		host, err = runtime.Discover(*wg, *db, *privateEndpoint, *homeCIDRs, *publicEndpoint)
 	}

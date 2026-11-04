@@ -7,10 +7,11 @@ import (
 	"strconv"
 	"strings"
 
-	"golang.zx2c4.com/wireguard/wgctrl"
-	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 	"moorlan/internal/iface"
 	"moorlan/internal/payload"
+
+	"golang.zx2c4.com/wireguard/wgctrl"
+	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
 type Host struct {
@@ -29,8 +30,20 @@ func Discover(wgName, storePath, privateEndpoint, homeCIDRs, publicEndpoint stri
 }
 
 // DiscoverUnpair opens the device for the unpair HTTP service.
-func DiscoverUnpair(wgName, storePath, privateEndpoint, homeCIDRs string) (Host, error) {
-	return discover(wgName, storePath, privateEndpoint, homeCIDRs, "", false)
+// Only -private-endpoint is required (listen address); home CIDRs are for pairing leases.
+func DiscoverUnpair(wgName, storePath, privateEndpoint string) (Host, error) {
+	host, err := DiscoverDevice(wgName, storePath)
+	if err != nil {
+		return Host{}, err
+	}
+	pairIP, pairPort, err := resolvePrivateEndpoint(wgName, privateEndpoint, nil)
+	if err != nil {
+		return Host{}, err
+	}
+	host.PairIP = pairIP
+	host.PairHost = pairIP
+	host.PairPort = pairPort
+	return host, nil
 }
 
 // DiscoverDevice opens the device for rehydrate or --remove (no LAN control address).
@@ -180,7 +193,7 @@ func ipv4PrefixFullyPrivate(network *net.IPNet) bool {
 func parseHomeCIDRs(text string) ([]string, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
-		return nil, fmt.Errorf("home CIDRs required; pass -home-cidrs (for example -home-cidrs 10.10.0.0/16)")
+		return nil, fmt.Errorf("home CIDRs required; pass -home-cidrs (for example -home-cidrs 10.10.0.0/24,10.10.10.0/24,10.10.20.0/24,10.10.30.0/24,10.10.40.0/24)")
 	}
 	var out []string
 	seen := map[string]bool{}
@@ -208,7 +221,7 @@ func parseHomeCIDRs(text string) ([]string, error) {
 		out = append(out, cidr)
 	}
 	if len(out) == 0 {
-		return nil, fmt.Errorf("home CIDRs required; pass -home-cidrs (for example -home-cidrs 10.10.0.0/16)")
+		return nil, fmt.Errorf("home CIDRs required; pass -home-cidrs (for example -home-cidrs 10.10.0.0/24,10.10.10.0/24,10.10.20.0/24,10.10.30.0/24,10.10.40.0/24)")
 	}
 	return out, nil
 }
@@ -230,6 +243,9 @@ func resolvePrivateEndpoint(wgName, endpoint string, homeCIDRs []string) (string
 	ip = ip.To4()
 	if !localIPv4Configured(wgName, ip) {
 		return "", 0, fmt.Errorf("-private-endpoint host %s is not configured on this host", ip)
+	}
+	if len(homeCIDRs) == 0 {
+		return ip.String(), port, nil
 	}
 	for _, cidr := range homeCIDRs {
 		_, network, err := net.ParseCIDR(cidr)

@@ -41,6 +41,9 @@ func TestResolvePrivateEndpointValidation(t *testing.T) {
 	if _, _, err := resolvePrivateEndpoint("wg0", "", []string{"10.10.0.0/16"}); err == nil {
 		t.Fatal("missing private-endpoint accepted")
 	}
+	if _, _, err := resolvePrivateEndpoint("wg0", "", nil); err == nil {
+		t.Fatal("missing private-endpoint accepted without home CIDRs")
+	}
 	if _, _, err := resolvePrivateEndpoint("wg0", "10.10.10.1", []string{"10.10.0.0/16"}); err == nil {
 		t.Fatal("private-endpoint without port accepted")
 	}

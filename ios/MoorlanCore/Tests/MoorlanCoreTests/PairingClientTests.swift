@@ -105,7 +105,27 @@ final class PairingClientTests: XCTestCase {
         do {
             try await PairingClient().unpair(server: server(), publicKey: key, session: offline)
             XCTFail("Offline unpair succeeded")
-        } catch { }
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("192.168.1.10:8756"), error.localizedDescription)
+            XCTAssertTrue(error.localizedDescription.contains("Local Network"), error.localizedDescription)
+            XCTAssertTrue(error.localizedDescription.contains("firewall"), error.localizedDescription)
+        }
+    }
+
+    func testPairTransportTimeoutNamesEndpoint() async {
+        let card = server().card
+        let offline = session { _ in throw URLError(.timedOut) }
+        defer { offline.invalidateAndCancel() }
+        do {
+            _ = try await PairingClient().pair(card: card, publicKey: key, label: "iPhone", session: offline)
+            XCTFail("Expected LAN unreachable")
+        } catch {
+            XCTAssertEqual(
+                error.localizedDescription,
+                LANReachability.unreachableMessage(for: card.pairURL)
+            )
+            XCTAssertFalse(error.localizedDescription.hasPrefix("Pairing failed:"))
+        }
     }
 
     func testLegacyPairingCannotSilentlyForgetHost() async {
