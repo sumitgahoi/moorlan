@@ -33,7 +33,10 @@
   including when hairpin policy keeps the tunnel off at home.
 - Provide server subnet access and manual/automatic exit routing.
 - Automatic: exit on other Wi-Fi; split on explicit trusted Wi-Fi and cellular.
-- Home LAN always disconnects. Detect physical addresses, not the VPN's address.
+- Home Wi‑Fi always disconnects when the current SSID is in the profile’s home
+  SSID set (Add current network in Settings). Home CIDRs from the server
+  (`-home-cidrs`) are for split-tunnel routes when away, not hairpin. Pairing
+  HTTP uses an explicit `-private-endpoint host:port` on the server.
 - Never trust unknown Wi-Fi by a reused interface name; use Apple's Wi-Fi identity.
 - Run policy in the Packet Tunnel extension, and native on-demand rules where the
   home SSID is known, with documented platform/permission limitations.

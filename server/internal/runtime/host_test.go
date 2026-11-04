@@ -1,47 +1,78 @@
 package runtime
 
 import (
-	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 	"net"
+	"strings"
 	"testing"
 
-	"moorlan/internal/iface"
+	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
-func TestSelectLANFollowsRouteInsteadOfDockerBridge(t *testing.T) {
-	candidates := []iface.LAN{
-		{Device: "docker0", IP: "172.17.0.1", CIDR: "172.17.0.0/16"},
-		{Device: "eth0", IP: "192.168.1.10", CIDR: "192.168.1.0/24"},
-		{Device: "eth1", IP: "10.0.0.10", CIDR: "10.0.0.0/24"},
+func TestParseHomeCIDRs(t *testing.T) {
+	got, err := parseHomeCIDRs("10.10.0.0/16")
+	if err != nil || len(got) != 1 || got[0] != "10.10.0.0/16" {
+		t.Fatalf("%v %v", got, err)
 	}
-	got, err := selectLAN(candidates, "", net.ParseIP("192.168.1.10"))
-	if err != nil || got.Device != "eth0" || got.CIDR != "192.168.1.0/24" {
-		t.Fatalf("%+v %v", got, err)
+	got, err = parseHomeCIDRs("10.10.10.0/24, 10.10.20.0/24,10.10.10.0/24")
+	if err != nil || len(got) != 2 || got[0] != "10.10.10.0/24" || got[1] != "10.10.20.0/24" {
+		t.Fatalf("dedupe/split: %v %v", got, err)
 	}
-	got, err = selectLAN(candidates, "eth1", net.ParseIP("192.168.1.10"))
-	if err != nil || got.Device != "eth1" {
-		t.Fatalf("explicit interface ignored: %+v %v", got, err)
+	if _, err := parseHomeCIDRs(""); err == nil {
+		t.Fatal("empty home CIDRs accepted")
 	}
-	if _, err := selectLAN(candidates, "missing", nil); err == nil {
-		t.Fatal("missing interface accepted")
+	if _, err := parseHomeCIDRs("203.0.113.0/24"); err == nil {
+		t.Fatal("public home CIDR accepted")
 	}
-	// A default route through an excluded VPN must not choose an arbitrary LAN.
-	if _, err := selectLAN(candidates, "", net.ParseIP("10.8.0.1")); err == nil {
-		t.Fatal("missing route address accepted")
+	if _, err := parseHomeCIDRs("192.168.0.0/15"); err == nil {
+		t.Fatal("prefix that spills into public space accepted")
+	}
+	if _, err := parseHomeCIDRs("10.0.0.0/7"); err == nil {
+		t.Fatal("prefix wider than 10.0.0.0/8 accepted")
+	}
+	if _, err := parseHomeCIDRs("172.16.0.0/11"); err == nil {
+		t.Fatal("prefix wider than 172.16.0.0/12 accepted")
+	}
+	if _, err := parseHomeCIDRs("not-a-cidr"); err == nil {
+		t.Fatal("garbage home CIDR accepted")
 	}
 }
 
-func TestSelectLANMultipleAddresses(t *testing.T) {
-	candidates := []iface.LAN{
-		{Device: "eth0", IP: "192.168.1.10", CIDR: "192.168.1.0/24"},
-		{Device: "eth0", IP: "192.168.1.11", CIDR: "192.168.1.0/24"},
+func TestResolvePrivateEndpointValidation(t *testing.T) {
+	if _, _, err := resolvePrivateEndpoint("wg0", "", []string{"10.10.0.0/16"}); err == nil {
+		t.Fatal("missing private-endpoint accepted")
 	}
-	got, err := selectLAN(candidates, "eth0", net.ParseIP("192.168.1.11"))
-	if err != nil || got.IP != "192.168.1.11" {
-		t.Fatalf("%+v %v", got, err)
+	if _, _, err := resolvePrivateEndpoint("wg0", "10.10.10.1", []string{"10.10.0.0/16"}); err == nil {
+		t.Fatal("private-endpoint without port accepted")
 	}
-	if _, err := selectLAN(candidates, "eth0", nil); err == nil {
-		t.Fatal("ambiguous interface address accepted")
+	if _, _, err := resolvePrivateEndpoint("wg0", "203.0.113.1:8756", []string{"10.10.0.0/16"}); err == nil {
+		t.Fatal("public private-endpoint accepted")
+	}
+}
+
+func TestValidateHomeCIDRsRejectsTunnelOverlap(t *testing.T) {
+	_, tunnel, _ := net.ParseCIDR("10.8.0.0/24")
+	if err := validateHomeCIDRs([]string{"10.8.0.0/24"}, tunnel); err == nil {
+		t.Fatal("CIDR overlaps tunnel")
+	}
+	if err := validateHomeCIDRs([]string{"203.0.113.0/24"}, nil); err == nil {
+		t.Fatal("public network accepted as home CIDR")
+	}
+	if err := validateHomeCIDRs([]string{"192.168.0.0/15"}, nil); err == nil {
+		t.Fatal("prefix that spills into public space accepted")
+	}
+	if err := validateHomeCIDRs([]string{"192.168.1.0/24", "10.10.0.0/16"}, tunnel); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestHostLeaseHelpers(t *testing.T) {
+	h := Host{HomeCIDRs: []string{"10.10.10.0/24", "10.10.20.0/24"}}
+	if got := h.HomeCIDRLease(); got != "10.10.10.0/24,10.10.20.0/24" {
+		t.Fatal(got)
+	}
+	got := h.RoutePrefixes("10.8.0.0/24")
+	if strings.Join(got, ",") != "10.8.0.0/24,10.10.10.0/24,10.10.20.0/24" {
+		t.Fatal(got)
 	}
 }
 
@@ -67,18 +98,7 @@ func TestConventionalSetupRejectedBeforeEnrollment(t *testing.T) {
 	if err := validateInterface(device, []string{"10.8.0.1/24"}, true); err != nil {
 		t.Fatal("existing routed range should reserve addresses:", err)
 	}
-	// Cleanup remains available even when enrollment is unsupported.
 	if err := validateInterface(device, []string{"10.8.0.1/32"}, false); err != nil {
-		t.Fatal(err)
-	}
-	_, tunnel, _ := net.ParseCIDR("10.8.0.0/24")
-	if err := validateLAN(iface.LAN{IP: "10.8.0.10", CIDR: "10.8.0.0/24"}, tunnel); err == nil {
-		t.Fatal("LAN overlaps tunnel")
-	}
-	if err := validateLAN(iface.LAN{IP: "203.0.113.10", CIDR: "203.0.113.0/24"}, nil); err == nil {
-		t.Fatal("public network accepted as home LAN")
-	}
-	if err := validateLAN(iface.LAN{IP: "192.168.1.10", CIDR: "192.168.1.0/24"}, tunnel); err != nil {
 		t.Fatal(err)
 	}
 }

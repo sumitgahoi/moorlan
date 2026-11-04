@@ -8,7 +8,7 @@ struct EmptyPairingView: View {
             ContentUnavailableView {
                 Label("Pair with your WireGuard host", systemImage: "qrcode.viewfinder")
             } description: {
-                Text("Run moorlan on the machine with your existing interface, then scan the QR on the same trusted LAN.")
+                Text("Run moorlan on the WireGuard host (see moorlan.conf), then scan the QR from a home network.")
             } actions: {
                 Button {
                     onScan()

@@ -26,21 +26,12 @@ public final class NetworkPathMonitor: ObservableObject {
 
     private let monitor = NWPathMonitor()
     private let queue = DispatchQueue(label: "moorlan.path")
-    private var serverLAN: String?
     private var latestPath: Network.NWPath?
     private var pathGeneration = 0
     /// Optional richer Wi‑Fi id (e.g. `ssid:Home`) supplied by the app after NEHotspotNetwork lookup.
     private var wifiOverrideID: String?
 
     public init() {}
-
-    public func setServerLAN(_ cidr: String?) {
-        guard serverLAN != cidr else { return }
-        serverLAN = cidr
-        if let latestPath {
-            apply(latestPath)
-        }
-    }
 
     public func setWiFiNetworkID(_ id: String?) {
         wifiOverrideID = id
@@ -57,11 +48,6 @@ public final class NetworkPathMonitor: ObservableObject {
                 self.pathGeneration += 1
                 let generation = self.pathGeneration
                 #if os(iOS)
-                // Hairpin protection must not wait for an optional SSID lookup.
-                if let serverLAN = self.serverLAN, self.onServerLAN(serverLAN) {
-                    self.wifiOverrideID = nil
-                    self.apply(path)
-                }
                 if path.usesInterfaceType(.wifi) {
                     // Read the current association before publishing it; never
                     // reuse the previous SSID or trust an interface fingerprint.
@@ -93,9 +79,7 @@ public final class NetworkPathMonitor: ObservableObject {
     private func apply(_ path: Network.NWPath) {
         let interfaces = path.availableInterfaces.map(\.name)
         let kind: TunnelPolicy.PathKind
-        if let serverLAN, onServerLAN(serverLAN) {
-            kind = .serverLAN
-        } else if path.usesInterfaceType(.cellular) && !path.usesInterfaceType(.wifi) {
+        if path.usesInterfaceType(.cellular) && !path.usesInterfaceType(.wifi) {
             kind = .cellular
         } else if path.usesInterfaceType(.wifi) {
             kind = .wifi(id: wifiFingerprint(interfaces: interfaces))
@@ -105,15 +89,6 @@ public final class NetworkPathMonitor: ObservableObject {
         snapshot = Snapshot(kind: kind, interfaces: interfaces, saturated: path.status != .satisfied, wifiNetworkID: wifiOverrideID)
     }
 
-    /// Best-effort same-LAN check using the phone's current IPv4 addresses.
-    private func onServerLAN(_ cidr: String) -> Bool {
-        guard let network = IPv4Network(cidr) else { return false }
-        for address in localIPv4Addresses() where network.contains(address) {
-            return true
-        }
-        return false
-    }
-
     private func wifiFingerprint(interfaces: [String]) -> String {
         if let wifiOverrideID, !wifiOverrideID.isEmpty {
             return wifiOverrideID
@@ -121,7 +96,6 @@ public final class NetworkPathMonitor: ObservableObject {
         // An interface name such as en0 identifies hardware, not a Wi-Fi network.
         // Unknown networks always use the untrusted default and cannot be trusted.
         return "unidentified"
-
     }
 }
 
@@ -154,32 +128,4 @@ struct IPv4Address {
         guard inet_pton(AF_INET, text, &address) == 1 else { return nil }
         raw = UInt32(bigEndian: address.s_addr)
     }
-}
-
-func localIPv4Addresses() -> [IPv4Address] {
-    var addresses: [IPv4Address] = []
-    var ifaddr: UnsafeMutablePointer<ifaddrs>?
-    guard getifaddrs(&ifaddr) == 0, let first = ifaddr else { return [] }
-    defer { freeifaddrs(ifaddr) }
-
-    var ptr: UnsafeMutablePointer<ifaddrs>? = first
-    while let current = ptr {
-        let flags = Int32(current.pointee.ifa_flags)
-        let isUp = (flags & (IFF_UP | IFF_RUNNING)) == (IFF_UP | IFF_RUNNING)
-        let isLoopback = (flags & IFF_LOOPBACK) != 0
-        let name = String(cString: current.pointee.ifa_name)
-        // Only physical Wi-Fi/Ethernet addresses participate in hairpin detection.
-        // A VPN's utun address must never make an away network look like home.
-        if isUp, !isLoopback, name.hasPrefix("en"), let addr = current.pointee.ifa_addr, addr.pointee.sa_family == UInt8(AF_INET) {
-            var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
-            if getnameinfo(addr, socklen_t(addr.pointee.sa_len), &hostname, socklen_t(hostname.count), nil, 0, NI_NUMERICHOST) == 0 {
-                let text = String(cString: hostname)
-                if let ip = IPv4Address(text) {
-                    addresses.append(ip)
-                }
-            }
-        }
-        ptr = current.pointee.ifa_next
-    }
-    return addresses
 }

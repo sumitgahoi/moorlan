@@ -16,9 +16,3 @@ type Snapshot struct {
 	Addresses  []string
 }
 
-// LAN is the local interface/address used for pairing and its network.
-type LAN struct {
-	Device string
-	IP     string
-	CIDR   string
-}

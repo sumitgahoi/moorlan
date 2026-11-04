@@ -30,7 +30,47 @@ struct SettingsView: View {
                     if let id = tunnel.currentNetworkID {
                         HStack {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(id)
+                                Text(displayName(id))
+                                Text(homeCaption(for: id))
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if tunnel.selectedServer?.homeSSIDs.contains(id) == true {
+                                Button("Remove") { tunnel.removeHomeNetwork(id) }
+                            } else {
+                                Button("Add") { tunnel.addCurrentHomeNetwork() }
+                            }
+                        }
+                    } else {
+                        Text(pathSummary).foregroundStyle(.secondary)
+                        if case .wifi = tunnel.pathKind {
+                            Button("Allow Wi-Fi identification") { tunnel.identifyWiFi() }
+                            Text("Allow precise location for Wi-Fi identification so home networks can be added without typing.")
+                                .font(.footnote).foregroundStyle(.secondary)
+                        }
+                    }
+
+                    ForEach(homeSSIDList, id: \.self) { id in
+                        HStack {
+                            Text(displayName(id))
+                            Spacer()
+                            Button("Remove", role: .destructive) {
+                                tunnel.removeHomeNetwork(id)
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Home Wi‑Fi (tunnel off)")
+                } footer: {
+                    Text("Join each home SSID and tap Add. The tunnel stays off on these networks. Away routes still use the server’s home CIDRs.")
+                }
+
+                Section {
+                    if let id = tunnel.currentNetworkID, tunnel.selectedServer?.homeSSIDs.contains(id) != true {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(displayName(id))
                                 Text(tunnel.policy.trustedNetworkIDs.contains(id) ? "Trusted exception" : "Untrusted · full tunnel")
                                     .font(.footnote)
                                     .foregroundStyle(.secondary)
@@ -42,23 +82,11 @@ struct SettingsView: View {
                                 Button("Trust") { tunnel.trustCurrentNetwork() }
                             }
                         }
-                    } else {
-                        Text(pathSummary).foregroundStyle(.secondary)
-                        if case .wifi = tunnel.pathKind {
-                            Button("Allow Wi-Fi identification") { tunnel.identifyWiFi() }
-                            Text("To trust a specific Wi-Fi network, allow precise location for Wi-Fi identification in Settings. Unidentified Wi-Fi stays in exit mode.")
-                                .font(.footnote).foregroundStyle(.secondary)
-                        }
-                        if tunnel.pathKind == .serverLAN {
-                            Button("Allow Wi-Fi identification") { tunnel.identifyWiFi() }
-                            Text("Identifying home Wi-Fi enables Apple's automatic disconnect and reconnect rules.")
-                                .font(.footnote).foregroundStyle(.secondary)
-                        }
                     }
 
                     ForEach(Array(tunnel.policy.trustedNetworkIDs).filter { $0 != tunnel.currentNetworkID }.sorted(), id: \.self) { id in
                         HStack {
-                            Text(id)
+                            Text(displayName(id))
                             Spacer()
                             Button("Remove", role: .destructive) {
                                 tunnel.policy.trustedNetworkIDs.remove(id)
@@ -72,20 +100,20 @@ struct SettingsView: View {
                 } header: {
                     Text("Trusted Wi‑Fi exceptions")
                 } footer: {
-                    Text("Automatic mode uses exit routing on untrusted Wi-Fi and subnet routing on trusted Wi-Fi and cellular. The home LAN always disconnects.")
+                    Text("Automatic mode uses exit routing on untrusted Wi‑Fi and subnet routing on trusted Wi‑Fi and cellular. Home Wi‑Fi always disconnects.")
                 }
 
                 if let server = tunnel.selectedServer {
                     Section("Paired host") {
                         LabeledContent("Host", value: server.displayName)
                         LabeledContent("Public key", value: String(server.publicKey.prefix(20)) + "…")
-                        LabeledContent("LAN", value: server.lan ?? "Unknown")
+                        LabeledContent("Home CIDRs", value: server.lan ?? "Unknown")
                         LabeledContent("Client IP", value: server.lease.address)
                         Button(tunnel.isUnpairing ? "Deleting…" : "Delete profile", role: .destructive) {
                             showUnpairScanner = true
                         }
                         .disabled(tunnel.isUnpairing)
-                        Text("Run moorlan --unpair on the server, then scan its QR on home Wi-Fi. The profile is kept if the server cannot confirm removal.")
+                        Text("Run moorlan --unpair on the server, then scan its QR on home Wi‑Fi. The profile is kept if the server cannot confirm removal.")
                             .font(.footnote).foregroundStyle(.secondary)
                     }
                 }
@@ -106,6 +134,13 @@ struct SettingsView: View {
         }
     }
 
+    private var homeSSIDList: [String] {
+        guard let current = tunnel.currentNetworkID else {
+            return Array(tunnel.selectedServer?.homeSSIDs ?? []).sorted()
+        }
+        return Array(tunnel.selectedServer?.homeSSIDs ?? []).filter { $0 != current }.sorted()
+    }
+
     private var modeBinding: Binding<TunnelPolicy.Mode> {
         Binding(get: { tunnel.policy.mode }, set: { tunnel.policy.mode = $0; tunnel.savePolicy() })
     }
@@ -123,10 +158,20 @@ struct SettingsView: View {
     private var pathSummary: String {
         switch tunnel.pathKind {
         case .cellular: return "On cellular"
-        case .serverLAN: return "On the server LAN"
         case .wifi: return "On Wi‑Fi"
         case .other: return "No Wi‑Fi identity yet"
         }
+    }
+
+    private func homeCaption(for id: String) -> String {
+        if tunnel.selectedServer?.homeSSIDs.contains(id) == true {
+            return "Home · tunnel off"
+        }
+        return "Not marked as home"
+    }
+
+    private func displayName(_ id: String) -> String {
+        TunnelPolicy.ssidName(from: id) ?? id
     }
 
     private func settingLabel(_ title: String, detail: String) -> some View {

@@ -66,7 +66,7 @@ func fixture(t *testing.T) (*Assigner, *fakeWG, wgtypes.Key) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { store.db.Close() })
-	a := &Assigner{Host: Host{ConfPath: path, Snap: iface.Snapshot{Name: "wg0", PublicKey: fake.device.PublicKey.String(), Addresses: []string{"10.8.0.1/24"}, MTU: 1420}, LAN: iface.LAN{CIDR: "192.168.1.0/24"}, Endpoint: "vpn.example:51820"}, store: store, openClient: func() (wireguardClient, error) { return fake, nil }}
+	a := &Assigner{Host: Host{ConfPath: path, Snap: iface.Snapshot{Name: "wg0", PublicKey: fake.device.PublicKey.String(), Addresses: []string{"10.8.0.1/24"}, MTU: 1420}, HomeCIDRs: []string{"192.168.1.0/24"}, Endpoint: "vpn.example:51820"}, store: store, openClient: func() (wireguardClient, error) { return fake, nil }}
 	peer, err := wgtypes.GeneratePrivateKey()
 	if err != nil {
 		t.Fatal(err)

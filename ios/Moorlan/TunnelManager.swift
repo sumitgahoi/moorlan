@@ -32,8 +32,12 @@ final class TunnelManager: ObservableObject {
         guard let id = pathMonitor.snapshot.wifiNetworkID, id.hasPrefix("ssid:") else { return nil }
         return id
     }
+    var onHomeWiFi: Bool {
+        guard let id = currentNetworkID, let server = selectedServer else { return false }
+        return server.homeSSIDs.contains(id)
+    }
     var effectiveExit: Bool {
-        if case .connect(let full) = policy.decide(path: pathKind) { return full }
+        if case .connect(let full) = policy.decide(path: pathKind, homeSSIDs: selectedServer?.homeSSIDs ?? []) { return full }
         return false
     }
 
@@ -41,7 +45,6 @@ final class TunnelManager: ObservableObject {
         policy = store.loadPolicy()
         servers = store.loadServers()
         selectedServerID = UserDefaults.standard.string(forKey: "selected-server") ?? servers.first?.id
-        pathMonitor.setServerLAN(selectedServer?.lan)
         observePath()
         observeVPN()
         pathMonitor.start()
@@ -66,6 +69,23 @@ final class TunnelManager: ObservableObject {
         if let id = currentNetworkID { policy.trustedNetworkIDs.remove(id); savePolicy() }
     }
 
+    func addCurrentHomeNetwork() {
+        guard let id = currentNetworkID else { identifyWiFi(); return }
+        guard var server = selectedServer else { return }
+        guard server.homeSSIDs.insert(id).inserted else { return }
+        upsertServer(server)
+        lastProfile = nil
+        Task { await applyDesiredState() }
+    }
+
+    func removeHomeNetwork(_ id: String) {
+        guard var server = selectedServer else { return }
+        guard server.homeSSIDs.remove(id) != nil else { return }
+        upsertServer(server)
+        lastProfile = nil
+        Task { await applyDesiredState() }
+    }
+
     func pair(card: QRCard) async throws {
         try await LocalNetworkAuthorization.shared.ensureAccess(to: card.pairURL)
         let identity = try identityStore.loadOrCreate()
@@ -75,11 +95,17 @@ final class TunnelManager: ObservableObject {
             publicKey: identity.publicKey,
             label: name.isEmpty ? "iPhone" : name
         )
-        let server = PairedServer(card: card, lease: lease)
+        var server = PairedServer(card: card, lease: lease)
+        if let existing = servers.first(where: { $0.publicKey == server.publicKey }) {
+            server.homeSSIDs = existing.homeSSIDs
+        }
+        if let id = currentNetworkID {
+            server.homeSSIDs.insert(id)
+        }
         store.upsert(server)
         servers = store.loadServers()
         await selectProfile(server.id)
-        // Install the native profile even on the home LAN, where starting it is forbidden.
+        // Install the native profile even on home Wi‑Fi, where starting it is forbidden.
         _ = try await configureProfile(server)
         await applyDesiredState()
     }
@@ -95,7 +121,6 @@ final class TunnelManager: ObservableObject {
         UserDefaults.standard.set(id, forKey: "selected-server")
         lastProfile = nil
         userWantsTunnel = true
-        pathMonitor.setServerLAN(selectedServer?.lan)
         await reloadManager()
     }
 
@@ -103,9 +128,11 @@ final class TunnelManager: ObservableObject {
         guard !isUnpairing, !applying else { lastError = "VPN configuration is busy. Retry shortly."; return false }
         do {
             let server = try card.pairedServer(in: servers)
-            pathMonitor.setServerLAN(server.lan)
-            defer { pathMonitor.setServerLAN(selectedServer?.lan) }
-            guard pathKind == .serverLAN else { throw MoorlanError.unpairFailed("Delete profiles on the server’s home LAN") }
+            if !server.homeSSIDs.isEmpty {
+                guard let id = currentNetworkID, server.homeSSIDs.contains(id) else {
+                    throw MoorlanError.unpairFailed("Join one of this profile’s home Wi‑Fi networks, then try again")
+                }
+            }
             isUnpairing = true
             defer { isUnpairing = false }
             guard let identity = try identityStore.load() ?? IdentityStore().load() else { throw MoorlanError.missingIdentity }
@@ -164,9 +191,8 @@ final class TunnelManager: ObservableObject {
     }
     private func applyOnce() async {
         guard let server = selectedServer else { await disconnect(); return }
-        pathMonitor.setServerLAN(server.lan)
         guard !pathMonitor.snapshot.saturated else { statusReason = "Waiting for a network"; return }
-        let decision = policy.decide(path: pathKind)
+        let decision = policy.decide(path: pathKind, homeSSIDs: server.homeSSIDs)
         do {
             let profile = makeProfile(server)
             let changed = profile != lastProfile
@@ -192,11 +218,7 @@ final class TunnelManager: ObservableObject {
     }
 
     private func makeProfile(_ server: PairedServer) -> TunnelProfile {
-        let defaults = UserDefaults(suiteName: AppIdentity.appGroup)
-        if pathKind == .serverLAN, let id = currentNetworkID {
-            defaults?.set(String(id.dropFirst(5)), forKey: "home-ssid-" + server.id)
-        }
-        return TunnelProfile(server: server, policy: policy, homeSSID: defaults?.string(forKey: "home-ssid-" + server.id))
+        TunnelProfile(server: server, policy: policy)
     }
     private func configureProfile(_ server: PairedServer) async throws -> NETunnelProviderManager {
         let identity = try identityStore.loadOrCreate()
@@ -212,17 +234,18 @@ final class TunnelManager: ObservableObject {
         proto.serverAddress = server.lease.endpoint
         proto.providerConfiguration = ["profileID": server.id]
         manager.protocolConfiguration = proto
-        if let ssid = profile.homeSSID {
+        let homeNames = server.homeSSIDs.compactMap(TunnelPolicy.ssidName(from:)).sorted()
+        if !homeNames.isEmpty {
             let home = NEOnDemandRuleDisconnect()
             home.interfaceTypeMatch = .wiFi
-            home.ssidMatch = [ssid]
+            home.ssidMatch = homeNames
             let away = NEOnDemandRuleConnect()
             away.interfaceTypeMatch = .any
             manager.onDemandRules = [home, away]
             manager.isOnDemandEnabled = userWantsTunnel
         } else {
-            // Without a known home SSID, avoid an on-demand reconnect loop after
-            // the extension disconnects itself for hairpin protection.
+            // Without home SSIDs, avoid an on-demand reconnect loop after the
+            // extension disconnects itself for hairpin protection.
             manager.isOnDemandEnabled = false
             manager.onDemandRules = []
         }
@@ -249,6 +272,10 @@ final class TunnelManager: ObservableObject {
         do { manager = try await loadOrCreateManager(server); refreshStatus() }
         catch { lastError = error.localizedDescription; status = .invalid }
     }
+    private func upsertServer(_ server: PairedServer) {
+        store.upsert(server)
+        servers = store.loadServers()
+    }
     func disconnect() async { manager?.connection.stopVPNTunnel(); refreshStatus() }
     private func observeVPN() {
         observers.append(NotificationCenter.default.addObserver(forName: .NEVPNStatusDidChange, object: nil, queue: .main) { [weak self] _ in
@@ -256,7 +283,7 @@ final class TunnelManager: ObservableObject {
         })
     }
     private func observePath() {
-        pathMonitor.$snapshot.removeDuplicates().sink { [weak self] snapshot in
+        pathMonitor.$snapshot.removeDuplicates().sink { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
                 await self.applyDesiredState()

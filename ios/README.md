@@ -83,7 +83,7 @@ process, then explicitly run the new binary:
 ```bash
 cd /path/to/moorlan/server
 go build -o moorlan ./cmd/moorlan
-sudo ./moorlan
+sudo ./moorlan   # uses moorlan.conf, or pass -private-endpoint / -home-cidrs
 ```
 
 Scan the newly printed QR, not a previous screenshot. For deletion, start the
@@ -96,13 +96,13 @@ the server or change a QR already printed by an older process.
 
 | Network | Behavior |
 | --- | --- |
-| Physical Wi-Fi/Ethernet address on the server LAN | Disconnect / do not start |
+| Home Wi‑Fi (SSID marked in Settings) | Disconnect / do not start |
 | Other Wi-Fi | Exit node (full tunnel) |
 | Explicitly trusted Wi-Fi | Subnet access (split tunnel) |
 | Cellular | Subnet access (trusted by default) |
 | Unknown network | Exit node |
 
-Subnet mode includes the server-supplied tunnel prefixes and home LAN. Exit mode
+Subnet mode includes the server-supplied tunnel prefixes and home CIDRs. Exit mode
 adds `0.0.0.0/0` and `::/0` and sends DNS through the tunnel. The Linux server/router
 must support forwarding, return routes, and Internet NAT for these routes to work;
 see the server README. The current server provisions IPv4 device addresses, so it
@@ -112,9 +112,9 @@ The home Exit node toggle reflects the **effective** mode; changing it selects a
 manual full/split override. Tap **Use automatic network policy**, or select
 **Automatic** in Settings, to restore network defaults. Manual exit can be enabled
 on cellular/trusted Wi-Fi; manual subnet mode can be selected on other Wi-Fi.
-Home-LAN protection always wins, including over manual exit mode.
+Home Wi‑Fi protection always wins, including over manual exit mode.
 
-## Trusted Wi-Fi and background behavior
+## Home Wi‑Fi, trusted Wi‑Fi, and background behavior
 
 In Settings, choose **Allow Wi-Fi identification** when the Wi-Fi name is unavailable.
 Apple may require **While Using the App + Precise Location** and Access Wi-Fi
@@ -122,23 +122,20 @@ Information capability before exposing the SSID. No location coordinates are use
 A denied/unavailable Wi-Fi name never becomes a trustable interface fingerprint.
 See [Apple's fetchCurrent requirements](https://developer.apple.com/documentation/networkextension/nehotspotnetwork/fetchcurrent(completionhandler:)).
 
-Tap **Trust** on the current named network to add it to the list and restore
-Automatic mode. Remove it to use automatic exit routing again. Cellular starts
-trusted and has its own setting. Network transitions fetch the new Wi-Fi identity;
-an old SSID is not carried over to another association.
+**Home Wi‑Fi (tunnel off):** join each home SSID and tap **Add**. Repeat for every
+home network (for example one SSID per VLAN). Apple's on-demand rules disconnect
+on those SSIDs and reconnect away from them. Pairing also adds the current SSID
+when it is already identified.
+
+**Trusted Wi‑Fi (split when away):** tap **Trust** on a non-home named network to
+use subnet routing there in Automatic mode. Cellular starts trusted and has its
+own setting. Network transitions fetch the new Wi-Fi identity; an old SSID is not
+carried over to another association.
 
 The Packet Tunnel extension independently monitors network changes and applies
-the same policy through `WireGuardAdapter.update`. It shuts down upon detecting
-the physical home LAN, including when the app is backgrounded. VPN `utun` addresses
-are excluded from home-LAN detection.
-
-When the home Wi-Fi name is available, Apple's native on-demand rules disconnect
-on that SSID and reconnect away from it. Open Settings on home Wi-Fi and allow
-identification to enable this behavior. Without a known home SSID, the extension
-still stops on the home subnet, but automatic background reconnection after that
-stop is disabled to avoid an on-demand restart loop; reopen the app or Connect
-when away. Same-LAN detection uses physical IPv4 subnet membership and is a
-best-effort convenience: overlapping private subnets can look like home.
+the same SSID policy through `WireGuardAdapter.update`, including when the app is
+backgrounded. Without any home SSIDs configured, on-demand auto-reconnect is
+disabled to avoid a restart loop; add home networks in Settings.
 
 ## Delete a profile from both ends
 

@@ -62,15 +62,15 @@ private final class TunnelController {
     func start() async throws {
         let profile = try readProfile()
         self.profile = profile
-        monitor.setServerLAN(profile.lan)
         monitor.start()
         for _ in 0..<40 {
             if !monitor.snapshot.saturated { break }
             try await Task.sleep(nanoseconds: 50_000_000)
         }
-        guard case .connect(let full) = profile.policy.decide(path: monitor.snapshot.kind) else {
+        let homeSSIDs = Set(profile.homeSSIDs)
+        guard case .connect(let full) = profile.policy.decide(path: monitor.snapshot.kind, homeSSIDs: homeSSIDs) else {
             monitor.stop()
-            throw MoorlanError.tunnelFailed("Already on the server LAN")
+            throw MoorlanError.tunnelFailed("On a home Wi‑Fi network")
         }
         guard !stopping else { throw CancellationError() }
         let config = try configuration(full: full)
@@ -94,7 +94,6 @@ private final class TunnelController {
     }
     func reload() async throws {
         profile = try readProfile()
-        monitor.setServerLAN(profile?.lan)
         lastFullTunnel = nil
         await applyPolicy()
     }
@@ -106,7 +105,8 @@ private final class TunnelController {
         repeat {
             pending = false
             guard let profile, !monitor.snapshot.saturated else { return }
-            switch profile.policy.decide(path: monitor.snapshot.kind) {
+            let homeSSIDs = Set(profile.homeSSIDs)
+            switch profile.policy.decide(path: monitor.snapshot.kind, homeSSIDs: homeSSIDs) {
             case .disconnect:
                 await stop()
                 provider.cancelTunnelWithError(nil)

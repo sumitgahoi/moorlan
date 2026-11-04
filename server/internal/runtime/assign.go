@@ -258,5 +258,5 @@ func (a *Assigner) Assign(ctx context.Context, publicKey, label string) (pair.Le
 	if err = a.reconcile(ctx, client); err != nil {
 		return pair.Lease{}, err
 	}
-	return pair.Lease{Address: address, Prefixes: []string{pool.Network.String(), a.Host.LAN.CIDR}, LAN: a.Host.LAN.CIDR, PublicKey: device.PublicKey.String(), Endpoint: a.Host.Endpoint, MTU: a.Host.Snap.MTU, PersistentKeepalive: 25, UnpairToken: credential, Label: label}, nil
+	return pair.Lease{Address: address, Prefixes: a.Host.RoutePrefixes(pool.Network.String()), LAN: a.Host.HomeCIDRLease(), PublicKey: device.PublicKey.String(), Endpoint: a.Host.Endpoint, MTU: a.Host.Snap.MTU, PersistentKeepalive: 25, UnpairToken: credential, Label: label}, nil
 }

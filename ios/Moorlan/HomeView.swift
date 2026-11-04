@@ -34,7 +34,7 @@ struct HomeView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
-                    .disabled(tunnel.pathKind == .serverLAN)
+                    .disabled(tunnel.onHomeWiFi)
 
                     if tunnel.policy.mode != .automatic {
                         Button("Use automatic network policy") {
@@ -57,7 +57,7 @@ struct HomeView: View {
                     .disabled(
                         tunnel.status == .connecting
                             || tunnel.status == .disconnecting
-                            || tunnel.pathKind == .serverLAN
+                            || tunnel.onHomeWiFi
                             || tunnel.isUnpairing
                     )
                 }
@@ -176,18 +176,19 @@ struct HomeView: View {
     }
 
     private var modeLabel: String {
-        if case .disconnect = tunnel.policy.decide(path: tunnel.pathKind) {
-            return "Paused on server LAN"
+        let home = tunnel.selectedServer?.homeSSIDs ?? []
+        if case .disconnect = tunnel.policy.decide(path: tunnel.pathKind, homeSSIDs: home) {
+            return "Paused on home Wi‑Fi"
         }
-        if case .connect(let full) = tunnel.policy.decide(path: tunnel.pathKind) {
+        if case .connect(let full) = tunnel.policy.decide(path: tunnel.pathKind, homeSSIDs: home) {
             return full ? "Full tunnel" : "Split tunnel"
         }
         return "—"
     }
 
     private var pathCaption: String {
+        if tunnel.onHomeWiFi { return "Home Wi‑Fi · tunnel off" }
         switch tunnel.pathKind {
-        case .serverLAN: return "You're on the server LAN"
         case .cellular: return "Cellular · trusted by default"
         case .wifi(let id): return tunnel.policy.trustedNetworkIDs.contains(id) ? "Trusted Wi‑Fi" : "Untrusted Wi‑Fi"
         case .other: return "Current network"

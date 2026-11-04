@@ -56,14 +56,37 @@ public struct PairedServer: Codable, Equatable, Sendable, Identifiable {
     public var card: QRCard
     public var lease: Lease
     public var pairedAt: Date
+    /// Wi‑Fi networks (`ssid:Name`) where the tunnel stays off.
+    public var homeSSIDs: Set<String>
 
     public var publicKey: String { lease.publicKey }
     public var lan: String? { lease.lan ?? card.legacyLAN }
     public var displayName: String { card.legacyName ?? card.lanHost ?? "WireGuard" }
 
-    public init(card: QRCard, lease: Lease, pairedAt: Date = .now) {
+    public init(card: QRCard, lease: Lease, pairedAt: Date = .now, homeSSIDs: Set<String> = []) {
         self.card = card
         self.lease = lease
         self.pairedAt = pairedAt
+        self.homeSSIDs = homeSSIDs
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        card = try c.decode(QRCard.self, forKey: .card)
+        lease = try c.decode(Lease.self, forKey: .lease)
+        pairedAt = try c.decode(Date.self, forKey: .pairedAt)
+        homeSSIDs = try c.decodeIfPresent(Set<String>.self, forKey: .homeSSIDs) ?? []
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(card, forKey: .card)
+        try c.encode(lease, forKey: .lease)
+        try c.encode(pairedAt, forKey: .pairedAt)
+        try c.encode(homeSSIDs, forKey: .homeSSIDs)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case card, lease, pairedAt, homeSSIDs
     }
 }

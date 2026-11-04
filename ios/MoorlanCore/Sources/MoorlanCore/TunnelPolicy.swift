@@ -15,28 +15,44 @@ public struct TunnelPolicy: Equatable, Codable, Sendable {
         self.treatCellularAsTrusted = treatCellularAsTrusted
     }
     public enum PathKind: Equatable, Sendable {
-        case serverLAN, cellular, wifi(id: String), other
+        case cellular, wifi(id: String), other
     }
     public enum Decision: Equatable, Sendable {
         case disconnect(reason: String)
         case connect(fullTunnel: Bool)
     }
-    public func decide(path: PathKind) -> Decision {
-        if path == .serverLAN { return .disconnect(reason: "Already on the server LAN") }
+
+    /// Home Wi‑Fi (`ssid:Name`) keeps the tunnel off. Trusted Wi‑Fi is split in automatic mode.
+    public func decide(path: PathKind, homeSSIDs: Set<String> = []) -> Decision {
+        if case .wifi(let id) = path, id.hasPrefix("ssid:"), homeSSIDs.contains(id) {
+            return .disconnect(reason: "On a home Wi‑Fi network")
+        }
         if mode == .exit { return .connect(fullTunnel: true) }
         if mode == .split { return .connect(fullTunnel: false) }
         switch path {
-        case .serverLAN: return .disconnect(reason: "Already on the server LAN")
         case .cellular: return .connect(fullTunnel: !treatCellularAsTrusted)
         case .wifi(let id): return .connect(fullTunnel: !id.hasPrefix("ssid:") || !trustedNetworkIDs.contains(id))
         case .other: return .connect(fullTunnel: true)
         }
     }
+
     public func allowedIPs(lease: Lease, fullTunnel: Bool) -> [String] {
         var ips = Set(lease.prefixes.filter { !$0.isEmpty && $0 != "0.0.0.0/0" && $0 != "::/0" })
-        if let lan = lease.lan, !lan.isEmpty { ips.insert(lan) }
+        for cidr in Self.homeCIDRs(from: lease.lan) { ips.insert(cidr) }
         if fullTunnel { ips.insert("0.0.0.0/0"); ips.insert("::/0") }
         return ips.sorted()
+    }
+
+    /// Away-route prefixes from the lease `lan` field (one CIDR or comma-separated).
+    public static func homeCIDRs(from lan: String?) -> [String] {
+        guard let lan, !lan.isEmpty else { return [] }
+        return lan.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+    }
+
+    public static func ssidName(from networkID: String) -> String? {
+        guard networkID.hasPrefix("ssid:") else { return nil }
+        let name = String(networkID.dropFirst(5))
+        return name.isEmpty ? nil : name
     }
 }
 
@@ -48,8 +64,9 @@ public struct TunnelProfile: Codable, Equatable, Sendable {
     public var lease: Lease
     public var lan: String?
     public var policy: TunnelPolicy
-    public var homeSSID: String?
-    public init(server: PairedServer, policy: TunnelPolicy, homeSSID: String? = nil) {
+    public var homeSSIDs: [String]
+
+    public init(server: PairedServer, policy: TunnelPolicy) {
         id = server.id
         name = server.displayName
         lease = server.lease
@@ -57,7 +74,38 @@ public struct TunnelProfile: Codable, Equatable, Sendable {
         lease.unpairToken = nil
         lan = server.lan
         self.policy = policy
-        self.homeSSID = homeSSID
+        homeSSIDs = server.homeSSIDs.sorted()
     }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        lease = try c.decode(Lease.self, forKey: .lease)
+        lan = try c.decodeIfPresent(String.self, forKey: .lan)
+        policy = try c.decode(TunnelPolicy.self, forKey: .policy)
+        if let list = try c.decodeIfPresent([String].self, forKey: .homeSSIDs) {
+            homeSSIDs = list
+        } else if let legacy = try c.decodeIfPresent(String.self, forKey: .homeSSID), !legacy.isEmpty {
+            homeSSIDs = ["ssid:" + legacy]
+        } else {
+            homeSSIDs = []
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(name, forKey: .name)
+        try c.encode(lease, forKey: .lease)
+        try c.encodeIfPresent(lan, forKey: .lan)
+        try c.encode(policy, forKey: .policy)
+        try c.encode(homeSSIDs, forKey: .homeSSIDs)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, lease, lan, policy, homeSSIDs, homeSSID
+    }
+
     public static func storageKey(_ id: String) -> String { "profile-" + id }
 }

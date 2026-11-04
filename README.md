@@ -15,33 +15,36 @@ On the Linux server:
 ```bash
 cd server
 go build -o moorlan ./cmd/moorlan
+cp moorlan.conf.example moorlan.conf   # set private-endpoint, home-cidrs, optional public-endpoint
 sudo ./moorlan
-# DDNS or an external UDP-port override:
-sudo ./moorlan -endpoint home.example.com:51820
+# Or flags (override the file):
+sudo ./moorlan -private-endpoint 10.10.10.1:8756 -home-cidrs 10.10.0.0/16 -public-endpoint home.example.com:51820
 ```
 
 On the iPhone, scan the QR on home Wi-Fi, allow Camera and Local Network, and
-approve Apple's VPN profile prompt. A profile is installed even while the tunnel
-stays off on the home LAN. Select saved profiles from the home-screen menu.
+approve Apple's VPN profile prompt. Add each home SSID in Settings so the tunnel
+stays off there. Select saved profiles from the home-screen menu.
 
 ## Automatic routing
 
 | Current network | Default |
 | --- | --- |
-| Server's home LAN | Tunnel off (hairpin protection) |
+| Home Wi‑Fi (SSID marked in the app) | Tunnel off (hairpin protection) |
 | Other Wi-Fi | Exit node / full tunnel |
 | Wi-Fi on the trusted list | Subnet access / split tunnel |
 | Cellular | Subnet access / split tunnel |
 
 The Exit node toggle manually chooses full or split routing. **Automatic** in
-Settings restores network defaults. Hairpin protection takes precedence in every
-mode. Trust a specific Wi-Fi name in Settings; unidentified Wi-Fi stays untrusted.
+Settings restores network defaults. Home Wi‑Fi takes precedence in every mode.
+Add each home SSID in Settings (join it, then **Add**). Trust other Wi‑Fi names
+for split routing; unidentified Wi‑Fi stays untrusted.
 
-For deletion from the phone, run `sudo ./moorlan --unpair` in `server/`, choose
-**Delete profile** in the app, scan the unpair QR on home Wi-Fi, and confirm. The
-app retains its profile if the server cannot acknowledge deletion. For a lost
-phone, run `sudo ./moorlan --remove <device-public-key>` (or a unique device
-name). There is no offline delete queue.
+For deletion from the phone, run `sudo ./moorlan --unpair` (with `moorlan.conf`
+or the usual flags) in `server/`, choose **Delete profile** in the app, scan the
+unpair QR on home Wi-Fi, and confirm. The app retains its profile if the server
+cannot acknowledge deletion. For a lost phone, run
+`sudo ./moorlan --remove <device-public-key>` (or a unique device name). There is
+no offline delete queue.
 
 WireGuardKit handles encryption, packet routing and native configuration. Apple's
 AVFoundation, Network, NetworkExtension, CoreLocation and Keychain APIs handle
