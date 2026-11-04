@@ -1,95 +1,93 @@
 # Moorlan Linux server
 
-Pair phones with an existing home WireGuard server over trusted-LAN HTTP.
-Moorlan assigns individual tunnel addresses, writes its own marked config block,
-and applies managed peers through Go's wgctrl library without restarting WireGuard.
-The [iPhone app](../ios/README.md) handles the client.
+Pair phones with a dedicated WireGuard device over trusted-LAN HTTP.
+Moorlan stores peer assignments in SQLite and applies them live with wgctrl.
+It does **not** write networkd or wg-quick peer config. The [iPhone app](../ios/README.md)
+handles the client.
 
 ## Supported setup
 
 | Setting | Requirement / example |
 | --- | --- |
-| Interface | Existing Linux WireGuard interface, already up: `wg0` |
-| Server address | Exactly one private IPv4 address, `/16`–`/30`, usually `10.8.0.1/24` |
+| Interface | Existing WireGuard device named `moorlan0` (or `moorlan1`, …), already up |
+| Server address | Exactly one private IPv4 address, `/16`–`/30`, e.g. `10.10.83.1/24` |
 | Home CIDRs | Private IPv4 prefixes routed to phones when away (not used for hairpin) |
-| Config | Regular `/etc/wireguard/wg0.conf`; `SaveConfig=true` must be disabled |
-| Privileges | Root; config directory must be writable |
-| Phone address | Automatically allocated `/32`, such as `10.8.0.2/32` |
+| Peer persistence | SQLite at `/var/lib/moorlan/<iface>.db` (override with `-db`) |
+| Privileges | Root |
+| Phone address | Automatically allocated `/32` in the tunnel subnet |
 
-## Install
+Create and firewall the `moorlan0` device yourself (networkd, wg-quick, etc.). Ship
+it with **no peers**; Moorlan owns every peer on that interface.
 
-On the WireGuard host (Linux amd64/arm64):
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/sumitgahoi/moorlan/main/server/install.sh | sudo bash
-# Or from a checkout / release binary in the current directory:
-# sudo ./install.sh
-# sudo ./install.sh ./moorlan-linux-amd64
-```
-
-This installs:
-
-| Path | Purpose |
-| --- | --- |
-| `/opt/moorlan/moorlan` | Binary |
-| `/usr/local/bin/moorlan` | Symlink on `PATH` |
-| `/opt/moorlan/moorlan.conf` | Starter config (created only if missing) |
-
-Edit `private-endpoint` and `home-cidrs` in the conf, then:
-
-```bash
-sudo moorlan
-sudo moorlan --unpair
-sudo moorlan --remove "Kitchen iPhone"
-```
-
-## Run (from source)
+## Run
 
 ```bash
 cd server
 go build -o moorlan ./cmd/moorlan
-sudo ./install.sh ./moorlan   # or: cp moorlan.conf.example moorlan.conf && sudo ./moorlan
-# Flags override moorlan.conf:
-sudo moorlan -private-endpoint 10.10.10.1:8756 -home-cidrs 10.10.0.0/16
-# Exact VLAN prefixes:
-# sudo moorlan -home-cidrs 10.10.10.0/24,10.10.20.0/24,10.10.30.0/24,10.10.40.0/24
-# DDNS or an externally forwarded port different from the WG listen port:
-sudo moorlan -public-endpoint home.example.com:51820
+# Or use a GitHub Release binary for linux/amd64 or linux/arm64.
+
+# First-time setup, once moorlan0 is up with no peers:
+sudo ./moorlan --init
+
+# After boot (or from a systemd oneshot once moorlan0 is up):
+sudo ./moorlan --rehydrate
+
+# Enrollment (trusted LAN):
+sudo ./moorlan -private-endpoint 10.10.10.1:8756 -home-cidrs 10.10.0.0/16
+sudo ./moorlan --unpair -private-endpoint 10.10.10.1:8756 -home-cidrs 10.10.0.0/16
+sudo ./moorlan --remove '<device-public-key>'
 ```
 
-Static settings live in `moorlan.conf` (`key = value`, `#` comments). Moorlan loads
-the first existing of `./moorlan.conf` or `<binary-dir>/moorlan.conf` (so the
-`/opt/moorlan` install is picked up via the symlink), or an explicit `-config`
-path. See `moorlan.conf.example`.
+Flags only (no config file). Options:
 
-Options:
-
-- `-private-endpoint`: LAN HTTP control `host:port` (required). Host must be a
-  private IPv4 configured on this machine and inside `-home-cidrs`. Used as the
-  QR `pair_url` host.
-- `-home-cidrs`: private IPv4 CIDR(s) included in phone split-tunnel routes when
-  away (required). One prefix or comma-separated list. Hairpin / tunnel-off on
-  the phone is SSID-based, not CIDR-based.
-- `-wg`: WireGuard interface name, default `wg0`.
+- `-wg`: interface name, default `moorlan0` (must match `moorlan` + digits).
+- `-db`: SQLite path, default `/var/lib/moorlan/<wg>.db`.
+- `-private-endpoint`: LAN HTTP control `host:port` (required for pair/unpair).
+- `-home-cidrs`: private IPv4 CIDR(s) for split-tunnel routes when away (pair/unpair).
 - `-public-endpoint`: public WireGuard `host:port`; overrides STUN.
-- `--unpair`: display an unpair QR and expose DELETE only.
-- `--remove <key|label>`: remove a managed peer by WireGuard public key, or by
-  label when that label is unique, then exit.
+- `--init`: create the database for an empty device, then exit. Refuses an existing file.
+- `--rehydrate`: apply SQLite peers to the live device and exit (boot path).
+- `--unpair`: unpair QR + DELETE only.
+- `--remove <pubkey>`: admin removal by WireGuard public key, then exit (labels are hints only).
 
-Advanced options:
+Without `-public-endpoint`, STUN discovers a public IPv4 + WireGuard listen port.
+Discovery failure requires `-public-endpoint`. Moorlan never advertises the LAN
+address as the public VPN endpoint.
 
-- `-config`: path to `moorlan.conf`.
-- `-wg-conf`: wg-quick config path, default `/etc/wireguard/<wg>.conf`.
+## Persistence model
 
-Without `-public-endpoint`, STUN discovers a public IPv4 address, combined with the
-WireGuard listen port. The router must forward that same UDP port. Use
-`-public-endpoint` for DDNS or a different external port. Discovery failure
-requires an override; Moorlan never advertises the LAN address as the public VPN
-endpoint.
+| Owner | Responsibility |
+| --- | --- |
+| Host (networkd / wg-quick / …) | Device `moorlanN` exists: key, address, listen port, routes/firewall |
+| Moorlan SQLite | Phone peers (public key, `/32`, label) |
+| Live `wgctrl` | Peers currently on the device |
 
-Startup acquires one interface lock, opens SQLite, and repairs the managed block
-and managed live peers before displaying a QR. The process stays up until Ctrl-C.
-Multiple devices can scan the same QR and retry requests.
+`--rehydrate` **rehydrates** the live device from SQLite after reboot (and removes
+any live peer not in the database). Pair / unpair / `--remove` also reconcile
+database peers and pending removals with the live device.
+Only `--init` creates a database; every other mode requires an initialized file.
+Use `--init` once during setup, never in the boot service. If a database is lost,
+restore it from backup.
+Sample oneshot units (pick the one that matches how you create `moorlan0`):
+
+| File | When to use |
+| --- | --- |
+| [`systemd/moorlan-rehydrate.networkd.service`](systemd/moorlan-rehydrate.networkd.service) | `moorlan0` from systemd-networkd |
+| [`systemd/moorlan-rehydrate.wg-quick.service`](systemd/moorlan-rehydrate.wg-quick.service) | `moorlan0` from `wg-quick@moorlan0` |
+
+Install one as `moorlan-rehydrate.service` (site deploy / linux-router owns the enabled copy):
+
+```bash
+# networkd example:
+sudo install -m 644 systemd/moorlan-rehydrate.networkd.service /etc/systemd/system/moorlan-rehydrate.service
+# or wg-quick:
+# sudo install -m 644 systemd/moorlan-rehydrate.wg-quick.service /etc/systemd/system/moorlan-rehydrate.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now moorlan-rehydrate.service
+```
+
+Moorlan does not wait for the interface inside the binary; unit ordering must
+ensure the device exists before `--rehydrate` runs.
 
 ## Protocol and trust
 
@@ -100,99 +98,34 @@ The version 1 pairing QR contains only protocol/discovery information:
 ```
 
 There is no invitation token or expiry. **Anyone who can reach the service can
-enroll while it is running.** Run it explicitly for pairing on a trusted home LAN
-with trusted users/devices; stop it afterward. HTTP is intentional for this scope.
+enroll while it is running.** Run it explicitly for pairing on a trusted home LAN;
+stop it afterward. HTTP is intentional for this scope.
 The QR server key lets the app check the returned identity; it does not authenticate
 HTTP traffic or establish an encrypted control channel.
 
 `POST /v1/pair` JSON is `{ "public_key": "<device-key>", "label": "iPhone" }`.
-The label is the phone's device name (admin hint only; duplicates are allowed)
-and is returned in the lease. The response also contains the assigned `/32`,
-tunnel plus home-CIDR routing prefixes, server public key, public endpoint,
-`lan` (home CIDRs from `-home-cidrs`, comma-separated when multiple), MTU,
-keepalive and a plaintext HMAC `unpair_token`. Responses are constructed from
-current settings, not stored. The same key gets the same committed assignment on
-retry (including its `unpair_token`) and can refresh its label — see LIMITATIONS.
-Unsupported QR versions fail explicitly; update app and server together. The
-unpair QR is also version 1.
-
-## Managed configuration and allocation
-
-SQLite lives next to the config: `wg0.conf.moorlan.db`. It stores managed
-public-key/address/label assignments, the server's public identity, and temporary
-pending removals. Config and database files are owner-only (`0600`). The database
-contains no server private key. Do not delete it or back it up independently of
-the config.
-
-Only this block is generated, sorted by peer public key. Labels are rendered as
-comments:
-
-```
-### MOORLAN PEERS ###
-# Kitchen iPhone
-[Peer]
-PublicKey = …
-AllowedIPs = 10.8.0.2/32
-### END MOORLAN PEERS ###
-```
-
-Everything outside the block is preserved byte for byte. Existing peers stay
-untouched. There is no automatic migration/adoption of existing peers outside a
-marked block by older Moorlan versions; their existing AllowedIPs still reserve
-addresses in the pool.
-
-Allocation walks the configured tunnel subnet for a free `/32`, skipping the
-server address, network/broadcast, and addresses claimed by any live AllowedIP.
-A successful unpair releases that device's allocation for reuse. There is no
-pool override.
-
-SQLite is authoritative for managed peers. One process-lifetime interface lock
-(`/run/moorlan-<iface>.lock`) prevents other Moorlan processes from managing it.
-Pairing commits an assignment, renders and atomically saves the block using a
-rename, then applies the live peer. Unpair verifies the HMAC, deletes the
-assignment, regenerates the block, removes the live peer, and clears the pending
-row in one transaction.
-
-On startup, if the database is present, managed peers are reconciled against the
-managed block and live interface. Missing/reversed/duplicate individual peers are
-repaired. If the database is missing while the block contains peers, startup fails
-instead of erasing them. Restore the database and config together. No
-whole-interface `wg-quick save`, per-request backup, rollback, or interface
-restart is used.
+The response contains the assigned `/32`, routing prefixes, server public key,
+public endpoint, `lan` (home CIDRs), MTU, keepalive, and a plaintext HMAC
+`unpair_token`. The same key gets the same assignment on retry (including its
+`unpair_token`) and can refresh its label — see LIMITATIONS.
 
 ## Unpair
 
-Phone-initiated (device still present):
+Phone-initiated: `sudo ./moorlan --unpair ...`, scan QR, confirm. Only HTTP 204
+permits local profile deletion.
 
-```bash
-sudo ./moorlan --unpair
-```
+Admin-initiated: `sudo ./moorlan --remove <device-public-key>` (from `wg show`
+or SQLite). Labels are hints only and are not accepted for `--remove`.
 
-On home Wi‑Fi, choose **Delete profile** in the app, scan this QR, and confirm.
-The public QR identifies the server and current LAN URL. The phone sends
-`DELETE /v1/pair` with its public key and saved `unpair_token`. Only an HTTP 204
-acknowledgement permits local profile deletion. Failures retain the phone profile
-and credential so the user can retry. This mode skips endpoint/STUN discovery.
+The server commits removal intent before revoking live access, so a crash cannot
+cause `--rehydrate` to restore a removed peer. Failed live removals remain in a
+short journal; retry the same `--remove <pubkey>` or run `--rehydrate` to finish.
+The phone removes its local profile only after the server confirms live removal
+with HTTP 204.
 
-The credential is a per-peer HMAC derived from the server WireGuard private key.
-It survives restarts; rotating that key is unsupported with the existing database.
-
-Admin-initiated (lost device):
-
-```bash
-sudo ./moorlan --remove <device-public-key>
-# or, when the device name is unique among managed peers:
-sudo ./moorlan --remove "Kitchen iPhone"
-```
-
-Read the managed conf block (label comment + `PublicKey`) to pick the right
-peer. This deletes the SQLite assignment, regenerates the managed block, removes
-the live peer, and exits. No phone or HMAC is required. A non-unique label
-fails with an error asking for the public key instead.
-
-Enrollment of new keys while pairing is running remains open on the trusted LAN.
-`POST` of an already-managed public key also returns that peer's `unpair_token`,
-and pairing mode still serves `DELETE /v1/pair`. Stop the process when finished.
+While pairing runs, `POST` of an already-managed public key also returns that
+peer's `unpair_token`, and pairing mode still serves `DELETE /v1/pair`. Stop the
+process when finished.
 
 ## Networking notes
 
@@ -200,8 +133,7 @@ and pairing mode still serves `DELETE /v1/pair`. Stop the process when finished.
   and `-home-cidrs`. LAN access needs forwarding and return routes; exit mode
   needs NAT/masquerade for phone traffic.
 - The home CIDRs and tunnel subnet must not overlap.
-- Client access to the LAN/tunnel from away is via WireGuard AllowedIPs; hairpin
-  protection on the phone is SSID-based (see the iOS app).
+- Hairpin protection on the phone is SSID-based (see the iOS app).
 
 ## LIMITATIONS
 
@@ -210,16 +142,16 @@ and pairing mode still serves `DELETE /v1/pair`. Stop the process when finished.
   stop the process when finished.
 - While pairing runs, anyone who can reach the service and knows a managed peer's
   WireGuard public key can `POST` that key, receive its `unpair_token`, refresh
-  its label, and `DELETE` the peer. Treat peer public keys and the pairing
-  window as sensitive on that LAN. Prefer `--remove` on the host for admin
+  its label, and `DELETE` the peer. Prefer `--remove` on the host for admin
   revocation when the phone is unavailable.
+- Only interfaces named `moorlan0`, `moorlan1`, … are supported.
+- Database creation requires `--init`, an empty device, and a new file path.
+  Other modes fail on a missing or uninitialized database; restore a lost database
+  instead of initializing a replacement.
 - Pairing/unpair requires reachable home LAN; there is no offline deletion queue.
 - No STUN NAT traversal, UPnP, relay, CGNAT bypass or external-port discovery.
-- Do not manually change the managed block/database, move managed peers outside
-  the block, change the server key or tunnel subnet, or run other configuration
-  writers against the same interface while Moorlan is managing it. Existing
-  peers outside the block remain admin-owned; unapplied external file edits are
-  not monitored.
+- Do not put Moorlan phone peers in networkd/wg-quick config. Do not change the
+  server key or tunnel subnet out from under an existing database.
 
 ## Development
 
@@ -232,10 +164,5 @@ go build -o moorlan ./cmd/moorlan
 Pushing a `v*` tag runs `.github/workflows/server-release.yml`: Linux
 `amd64`/`arm64` binaries (and SHA-256 checksums) are attached to a GitHub
 Release. Manual workflow runs build and test without publishing.
-
-Existing PeerDoor installs: conf markers `### PEERDOOR PEERS ###` are still
-read; the next save rewrites them as `### MOORLAN PEERS ###`. The database file
-is renamed from `*.peerdoor.db` to `*.moorlan.db` on first open. Re-pair phones
-after upgrading so they receive a new `unpair_token` (HMAC domain changed).
 
 SQLite uses the pure-Go modernc driver; Linux cross-compilation needs no C compiler.

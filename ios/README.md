@@ -83,7 +83,7 @@ process, then explicitly run the new binary:
 ```bash
 cd /path/to/moorlan/server
 go build -o moorlan ./cmd/moorlan
-sudo ./moorlan   # uses moorlan.conf, or pass -private-endpoint / -home-cidrs
+sudo ./moorlan -private-endpoint … -home-cidrs …   # device moorlan0 must already exist
 ```
 
 Scan the newly printed QR, not a previous screenshot. For deletion, start the
@@ -144,7 +144,7 @@ Paired host → Delete profile** and scan its public unpair QR (the main scanner
 accepts it). Confirm the named saved host.
 
 At pair time the app sends `UIDevice.current.name` as a server-side label for
-conf comments and optional admin `--remove` when that name is unique.
+admin hints; admin `--remove` uses the peer public key only.
 
 The app matches the server public key, contacts the **current scanned LAN URL**,
 and supplies the saved per-peer HMAC credential in the DELETE body. After
@@ -236,6 +236,5 @@ DNS, background roaming and hairpin transitions still require a device/network t
 
 Enrollment is open to any trusted LAN user while the server process is running.
 The app checks the returned server key against the scanned version 1 QR. This is
-an identity consistency check, not authentication of the HTTP transport. Server
-peers from older versions outside the managed block remain unmanaged; the tool
-will not adopt or delete them. See the server README for migration limitations.
+an identity consistency check, not authentication of the HTTP transport. See the
+server README for the `moorlan0` / SQLite persistence model.

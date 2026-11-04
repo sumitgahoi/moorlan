@@ -89,12 +89,8 @@ jobs:
             ls -la dist >&2 || true
             exit 1
           fi
-          cp server/install.sh server/moorlan.conf.example dist/
-          chmod +x dist/install.sh
           gh release create "${GITHUB_REF_NAME}" \
             "${assets[@]}" \
-            dist/install.sh \
-            dist/moorlan.conf.example \
             --title "Moorlan server ${GITHUB_REF_NAME}" \
             --generate-notes \
             --verify-tag

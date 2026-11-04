@@ -18,38 +18,64 @@ type wireguardClient interface {
 	ConfigureDevice(string, wgtypes.Config) error
 	Close() error
 }
+
 type Assigner struct {
-	mu          sync.Mutex
-	Host        Host
-	store       *peerStore
-	openClient  func() (wireguardClient, error)
-	writeConfig func(string, []byte) error
+	mu         sync.Mutex
+	Host       Host
+	store      *peerStore
+	openClient func() (wireguardClient, error)
 }
 
-// OpenAssigner repairs unfinished managed changes before any QR is displayed.
+// OpenAssigner opens the peer database. It does not touch the live device;
+// call Reconcile (rehydrate) or mutate via Assign/Remove to apply peers.
 func OpenAssigner(ctx context.Context, host Host) (*Assigner, error) {
-	config, err := readConfig(host.ConfPath)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	store, err := openStore(host.StorePath, host.Snap.PublicKey)
 	if err != nil {
 		return nil, err
 	}
-	store, err := openStore(storePath(host.ConfPath), host.Snap.PublicKey, config)
-	if err != nil {
-		return nil, err
-	}
-	a := &Assigner{Host: host, store: store}
-	if err = a.Reconcile(ctx); err != nil {
-		a.Close()
-		return nil, err
-	}
-	return a, nil
+	return &Assigner{Host: host, store: store}, nil
 }
+
+// InitDatabase creates a database for an empty device without changing live peers.
+// The caller holds the interface lock, just as for all other command modes.
+func InitDatabase(ctx context.Context, host Host) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	live, err := countLivePeers(host.Snap.Name)
+	if err != nil {
+		return err
+	}
+	return initStore(host.StorePath, host.Snap.PublicKey, live)
+}
+
+func countLivePeers(name string) (int, error) {
+	client, err := wgctrl.New()
+	if err != nil {
+		return 0, err
+	}
+	defer client.Close()
+	device, err := client.Device(name)
+	if err != nil {
+		return 0, err
+	}
+	return len(device.Peers), nil
+}
+
 func (a *Assigner) Close() error { return a.store.db.Close() }
+
 func (a *Assigner) client() (wireguardClient, error) {
 	if a.openClient != nil {
 		return a.openClient()
 	}
 	return wgctrl.New()
 }
+
+// Reconcile applies SQLite to the live device: pending removals, install DB
+// peers, drop orphans (moorlanN is exclusively owned by Moorlan).
 func (a *Assigner) Reconcile(ctx context.Context) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -60,12 +86,9 @@ func (a *Assigner) Reconcile(ctx context.Context) error {
 	defer client.Close()
 	return a.reconcile(ctx, client)
 }
+
 func (a *Assigner) reconcile(ctx context.Context, client wireguardClient) error {
 	if err := ctx.Err(); err != nil {
-		return err
-	}
-	config, err := readConfig(a.Host.ConfPath)
-	if err != nil {
 		return err
 	}
 	peers, err := a.store.list(ctx)
@@ -76,49 +99,13 @@ func (a *Assigner) reconcile(ctx context.Context, client wireguardClient) error 
 	if err != nil {
 		return err
 	}
-	external := peerKeys(config.external)
-	for _, p := range peers {
-		if external[p.PublicKey] {
-			return fmt.Errorf("managed peer also appears outside Moorlan block")
-		}
-	}
-	for _, key := range removals {
-		if external[key] {
-			return fmt.Errorf("cannot remove a peer outside Moorlan block")
-		}
-	}
-	// Database entries must still fit the configured tunnel subnet. Changing the
-	// subnet behind Moorlan is unsupported; fail rather than send a bad lease.
-	pool, err := iface.SelectPool(a.Host.Snap.Addresses)
-	if err != nil {
-		return err
-	}
-	for _, p := range peers {
-		if !payload.ValidKey(p.PublicKey) {
-			return fmt.Errorf("invalid stored peer key")
-		}
-		if _, err := iface.Allocate(pool, []iface.Peer{p}, p.PublicKey); err != nil {
-			return err
-		}
-	}
 	device, err := client.Device(a.Host.Snap.Name)
 	if err != nil {
 		return err
 	}
-	if device.PublicKey.String() != a.Host.Snap.PublicKey {
-		return fmt.Errorf("WireGuard server identity changed; restart Moorlan")
-	}
-	write := a.writeConfig
-	if write == nil {
-		write = writeConfig
-	}
-	if err = write(a.Host.ConfPath, config.render(peers)); err != nil {
-		return fmt.Errorf("save managed block: %w", err)
-	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	// No ReplacePeers: unmanaged peers and their session/settings are untouched.
 	for _, value := range removals {
 		key, err := wgtypes.ParseKey(value)
 		if err != nil {
@@ -128,6 +115,7 @@ func (a *Assigner) reconcile(ctx context.Context, client wireguardClient) error 
 			return fmt.Errorf("remove live peer: %w", err)
 		}
 	}
+	managed := peerKeys(peers)
 	for _, p := range peers {
 		key, _ := wgtypes.ParseKey(p.PublicKey)
 		_, network, _ := net.ParseCIDR(p.AllowedIPs[0])
@@ -139,8 +127,6 @@ func (a *Assigner) reconcile(ctx context.Context, client wireguardClient) error 
 			}
 		}
 		allowed := []net.IPNet{*network}
-		// Compare via CIDR strings so 4-byte vs 16-byte IPv4 forms from the
-		// kernel and net.ParseCIDR do not force a needless ReplaceAllowedIPs.
 		if existing != nil && sameAllowedIPs(existing.AllowedIPs, allowed) {
 			continue
 		}
@@ -149,9 +135,23 @@ func (a *Assigner) reconcile(ctx context.Context, client wireguardClient) error 
 			return fmt.Errorf("install live peer: %w", err)
 		}
 	}
+	// Refresh after installs so orphan detection sees current state.
+	device, err = client.Device(a.Host.Snap.Name)
+	if err != nil {
+		return err
+	}
+	for _, live := range device.Peers {
+		if managed[live.PublicKey.String()] {
+			continue
+		}
+		if err = client.ConfigureDevice(device.Name, wgtypes.Config{Peers: []wgtypes.PeerConfig{{PublicKey: live.PublicKey, Remove: true}}}); err != nil {
+			return fmt.Errorf("remove orphan live peer: %w", err)
+		}
+	}
 	_, err = a.store.db.ExecContext(ctx, "DELETE FROM pending_removals")
 	return err
 }
+
 func peerKeys(peers []iface.Peer) map[string]bool {
 	out := map[string]bool{}
 	for _, p := range peers {
@@ -192,8 +192,6 @@ func (a *Assigner) Assign(ctx context.Context, publicKey, label string) (pair.Le
 		return pair.Lease{}, err
 	}
 	defer client.Close()
-	// Finish a prior deletion before permitting this key (or its address) to be
-	// enrolled again. Other failures leave the same assignment available on retry.
 	pending, err := a.store.pending(ctx)
 	if err != nil {
 		return pair.Lease{}, err
@@ -202,10 +200,6 @@ func (a *Assigner) Assign(ctx context.Context, publicKey, label string) (pair.Le
 		if err = a.reconcile(ctx, client); err != nil {
 			return pair.Lease{}, err
 		}
-	}
-	config, err := readConfig(a.Host.ConfPath)
-	if err != nil {
-		return pair.Lease{}, err
 	}
 	device, err := client.Device(a.Host.Snap.Name)
 	if err != nil {
@@ -216,12 +210,9 @@ func (a *Assigner) Assign(ctx context.Context, publicKey, label string) (pair.Le
 		return pair.Lease{}, err
 	}
 	managed := peerKeys(peers)
-	if peerKeys(config.external)[publicKey] {
-		return pair.Lease{}, fmt.Errorf("existing peer is outside Moorlan management")
-	}
 	for _, p := range device.Peers {
 		if p.PublicKey == key && !managed[publicKey] {
-			return pair.Lease{}, fmt.Errorf("existing live peer is outside Moorlan management")
+			return pair.Lease{}, fmt.Errorf("existing live peer is not in the Moorlan database; run --rehydrate or remove it first")
 		}
 	}
 	pool, err := iface.SelectPool(a.Host.Snap.Addresses)
@@ -239,10 +230,7 @@ func (a *Assigner) Assign(ctx context.Context, publicKey, label string) (pair.Le
 		}
 	}
 	if address == "" {
-		// Reserve the union of saved unmanaged routes, live routes, and committed
-		// managed assignments. Duplicate observations of a route need no merging.
-		reserved := append([]iface.Peer(nil), config.external...)
-		reserved = append(reserved, devicePeers(device)...)
+		reserved := append([]iface.Peer(nil), devicePeers(device)...)
 		reserved = append(reserved, peers...)
 		ip, err := iface.Allocate(pool, reserved, publicKey)
 		if err != nil {

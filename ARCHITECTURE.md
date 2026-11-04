@@ -13,22 +13,23 @@ No invitation token or expiry; multiple devices can enroll until the admin stops
 the process. An explicit endpoint overrides STUN; there is no LAN-only public
 endpoint fallback.
 
-SQLite persists managed public-key/address assignments before they are applied.
+The host owns the dedicated `moorlanN` device configuration, and Moorlan owns all
+peers on it. SQLite persists public-key/address assignments before they are applied.
 The allocator picks the lowest free /32 within one private IPv4 subnet, reserving
-saved/live external peer ranges and committed assignments. Existing peers remain
-unmanaged. A pure renderer sorts managed peers into a marked config block and
-preserves all bytes outside it. The caller atomically saves the file and applies
-only managed changes with wgctrl, preserving existing sessions. No interface
-restart, wg-quick save, response cache, or rollback is needed. A lifetime interface
-lock prevents another Moorlan process; one operation mutex serializes mutations.
+live peer ranges and committed assignments. No networkd or wg-quick peer file is
+written. `--init` exclusively creates a database for an empty device; all other
+modes require an existing initialized database. `--rehydrate` restores peers after
+boot and removes live peers absent from SQLite. Mutations also reconcile live state.
+A lifetime interface lock prevents another Moorlan process; one operation mutex
+serializes mutations. No interface restart is needed.
 
 Unpair deletes the assignment and journals the pending live removal in one database
-transaction. Startup or retry finishes saving/applying before clearing the journal.
+transaction. Rehydrate or retry finishes live removal before clearing the journal.
 The HMAC credential is derived from the WireGuard private key, not stored in SQLite.
 `--unpair` skips STUN and exposes DELETE only; its public QR is version 1.
-`--remove` deletes a managed peer by public key (or unique label) without the
-phone. Pairing stores the phone's device name as a label in SQLite and renders
-it as a conf comment; labels may repeat.
+`--remove` deletes a managed peer by WireGuard public key without the
+phone. Pending removals retain the label so administrative retries can find them.
+Pairing stores the phone's device name as a label in SQLite; labels may repeat.
 
 ## iPhone
 

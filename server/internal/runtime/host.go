@@ -3,8 +3,6 @@ package runtime
 import (
 	"fmt"
 	"net"
-	"os"
-	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -16,30 +14,36 @@ import (
 )
 
 type Host struct {
-	Snap       iface.Snapshot
-	PairIP     string
-	HomeCIDRs  []string
-	ConfPath   string
-	PairHost   string
-	PairPort   int
-	Endpoint   string
+	Snap      iface.Snapshot
+	StorePath string
+	PairIP    string
+	HomeCIDRs []string
+	PairHost  string
+	PairPort  int
+	Endpoint  string
 }
 
-func Discover(wgName, wgConf, privateEndpoint, homeCIDRs, publicEndpoint string) (Host, error) {
-	return discover(wgName, wgConf, privateEndpoint, homeCIDRs, publicEndpoint, true)
+// Discover opens an existing moorlanN device for pairing (needs pool + listen port).
+func Discover(wgName, storePath, privateEndpoint, homeCIDRs, publicEndpoint string) (Host, error) {
+	return discover(wgName, storePath, privateEndpoint, homeCIDRs, publicEndpoint, true)
 }
 
-// DiscoverUnpair needs only the existing device, private control address, and save configuration.
-func DiscoverUnpair(wgName, wgConf, privateEndpoint, homeCIDRs string) (Host, error) {
-	return discover(wgName, wgConf, privateEndpoint, homeCIDRs, "", false)
+// DiscoverUnpair opens the device for the unpair HTTP service.
+func DiscoverUnpair(wgName, storePath, privateEndpoint, homeCIDRs string) (Host, error) {
+	return discover(wgName, storePath, privateEndpoint, homeCIDRs, "", false)
 }
 
-func discover(wgName, wgConf, privateEndpoint, homeCIDRs, publicEndpoint string, pairing bool) (Host, error) {
+// DiscoverDevice opens the device for rehydrate or --remove (no LAN control address).
+func DiscoverDevice(wgName, storePath string) (Host, error) {
+	return discover(wgName, storePath, "", "", "", false)
+}
+
+func discover(wgName, storePath, privateEndpoint, homeCIDRs, publicEndpoint string, pairing bool) (Host, error) {
 	if runtime.GOOS != "linux" {
 		return Host{}, fmt.Errorf("Moorlan server requires Linux")
 	}
-	if !validInterfaceName(wgName) {
-		return Host{}, fmt.Errorf("invalid WireGuard interface name")
+	if err := validateInterfaceName(wgName); err != nil {
+		return Host{}, err
 	}
 	client, err := wgctrl.New()
 	if err != nil {
@@ -48,17 +52,38 @@ func discover(wgName, wgConf, privateEndpoint, homeCIDRs, publicEndpoint string,
 	defer client.Close()
 	device, err := client.Device(wgName)
 	if err != nil {
-		return Host{}, fmt.Errorf("read WireGuard interface %s: %w", wgName, err)
+		return Host{}, fmt.Errorf("read WireGuard interface %s: %w (create device %s first)", wgName, err, wgName)
 	}
 	addrs, mtu, err := interfaceAddresses(wgName)
 	if err != nil {
 		return Host{}, err
 	}
-	cidrs, err := parseHomeCIDRs(homeCIDRs)
-	if err != nil {
+	if err := validateInterface(device, addrs, pairing); err != nil {
 		return Host{}, err
 	}
-	pairIP, pairPort, err := resolvePrivateEndpoint(wgName, privateEndpoint, cidrs)
+	if storePath == "" {
+		storePath = DefaultStorePath(wgName)
+	}
+	host := Host{
+		Snap: iface.Snapshot{
+			Name:       wgName,
+			PublicKey:  device.PublicKey.String(),
+			ListenPort: device.ListenPort,
+			MTU:        mtu,
+			Addresses:  addrs,
+		},
+		StorePath: storePath,
+		Endpoint:  publicEndpoint,
+	}
+	if privateEndpoint == "" && homeCIDRs == "" {
+		if publicEndpoint != "" {
+			if _, _, err := payload.SplitEndpoint(publicEndpoint); err != nil {
+				return Host{}, err
+			}
+		}
+		return host, nil
+	}
+	cidrs, err := parseHomeCIDRs(homeCIDRs)
 	if err != nil {
 		return Host{}, err
 	}
@@ -73,49 +98,20 @@ func discover(wgName, wgConf, privateEndpoint, homeCIDRs, publicEndpoint string,
 	if err := validateHomeCIDRs(cidrs, subnet); err != nil {
 		return Host{}, err
 	}
-	if err := validateInterface(device, addrs, pairing); err != nil {
-		return Host{}, err
-	}
-	if wgConf == "" {
-		wgConf = filepath.Join("/etc/wireguard", wgName+".conf")
-	}
-	wgConf, err = filepath.Abs(wgConf)
+	pairIP, pairPort, err := resolvePrivateEndpoint(wgName, privateEndpoint, cidrs)
 	if err != nil {
 		return Host{}, err
-	}
-	if filepath.Base(wgConf) != wgName+".conf" {
-		return Host{}, fmt.Errorf("wg-quick config filename must be %s.conf", wgName)
-	}
-	info, err := os.Lstat(wgConf)
-	if err != nil {
-		return Host{}, err
-	}
-	if !info.Mode().IsRegular() {
-		return Host{}, fmt.Errorf("unsupported config: use a regular wg-quick file, not a symlink")
-	}
-	if _, err := os.ReadFile(wgConf); err != nil {
-		return Host{}, fmt.Errorf("read wg-quick configuration: %w", err)
 	}
 	if publicEndpoint != "" {
 		if _, _, err := payload.SplitEndpoint(publicEndpoint); err != nil {
 			return Host{}, err
 		}
 	}
-	return Host{
-		Snap: iface.Snapshot{
-			Name:       wgName,
-			PublicKey:  device.PublicKey.String(),
-			ListenPort: device.ListenPort,
-			MTU:        mtu,
-			Addresses:  addrs,
-		},
-		PairIP:    pairIP,
-		HomeCIDRs: cidrs,
-		ConfPath:  wgConf,
-		PairHost:  pairIP,
-		PairPort:  pairPort,
-		Endpoint:  publicEndpoint,
-	}, nil
+	host.HomeCIDRs = cidrs
+	host.PairIP = pairIP
+	host.PairHost = pairIP
+	host.PairPort = pairPort
+	return host, nil
 }
 
 func validateInterface(device *wgtypes.Device, addresses []string, pairing bool) error {

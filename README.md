@@ -10,16 +10,16 @@ This monorepo contains two independent applications:
 
 ## Quick start
 
-On the Linux server:
+On the Linux server, bring up WireGuard device `moorlan0` yourself, then:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/sumitgahoi/moorlan/main/server/install.sh | sudo bash
-# Edit /opt/moorlan/moorlan.conf (private-endpoint, home-cidrs), then:
-sudo moorlan
+cd server && go build -o moorlan ./cmd/moorlan
+sudo ./moorlan --init  # first-time setup only, with no peers on the device
+sudo ./moorlan --rehydrate
+sudo ./moorlan -private-endpoint 10.10.10.1:8756 -home-cidrs 10.10.0.0/16
 ```
 
-From source: `cd server && go build -o moorlan ./cmd/moorlan && sudo ./install.sh ./moorlan`.
-Flags still override the conf file when needed.
+Or download a release binary. See [server/README.md](server/README.md).
 
 On the iPhone, scan the QR on home Wi-Fi, allow Camera and Local Network, and
 approve Apple's VPN profile prompt. Add each home SSID in Settings so the tunnel
@@ -42,8 +42,7 @@ for split routing; unidentified Wi‑Fi stays untrusted.
 For deletion from the phone, run `sudo moorlan --unpair`, choose **Delete profile**
 in the app, scan the unpair QR on home Wi-Fi, and confirm. The app retains its
 profile if the server cannot acknowledge deletion. For a lost phone, run
-`sudo moorlan --remove <device-public-key>` (or a unique device name). There is
-no offline delete queue.
+`sudo moorlan --remove <device-public-key>`. There is no offline delete queue.
 
 WireGuardKit handles encryption, packet routing and native configuration. Apple's
 AVFoundation, Network, NetworkExtension, CoreLocation and Keychain APIs handle
@@ -70,11 +69,13 @@ The home LAN must use a different subnet. There is no pool override, IPv6
 provisioning, general site-to-site management, CGNAT relay, automatic NAT setup,
 or offline deletion. Pairing and unpair QRs use protocol version 1.
 
-SQLite stores assignments for peers enrolled through Moorlan. Only the marked
-Moorlan config block is generated; existing peers remain admin-owned. One process
-per interface applies targeted live updates without restarting WireGuard. Failed
-changes are finished by retry or startup. Enrollment is open to trusted LAN users
-until the process stops. Back up the config and database together.
+SQLite stores assignments for every peer on the dedicated `moorlanN` device.
+The host owns the device configuration; Moorlan writes no peer configuration files.
+Run `--init` once to create the database, and `--rehydrate` after boot to restore
+live peers. All other modes require an existing database. One process per interface
+applies live updates without restarting WireGuard. Failed removals are finished
+by retry or rehydrate. Enrollment is open to trusted LAN users until the process
+stops. Back up the database and keep the host's device configuration.
 
 Native iPhone signing,
 privacy permissions and Wi-Fi identification are required for the corresponding

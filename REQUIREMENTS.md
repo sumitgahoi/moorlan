@@ -7,23 +7,25 @@
 
 ## Server
 
-- Pair with an existing Linux WireGuard interface using trusted-LAN HTTP.
+- Pair with an existing Linux WireGuard device named `moorlan0` / `moorlanN`
+  using trusted-LAN HTTP. Host owns the device; Moorlan owns all peers on it.
 - Version 1 pairing QR: LAN URL and server public key, no invitation token;
   plaintext JSON over trusted-LAN HTTP including the phone device name as a
   label (duplicates allowed). Multiple devices can enroll while the admin
   leaves the process running.
 - Explicit endpoint or STUN public IPv4 plus configured WG port; no LAN fallback.
-- One private IPv4 interface subnet (/16–/30), automatic /32 allocation. Reserve
-  existing saved/live routes and SQLite assignments; no pool override.
-- SQLite is authoritative for enrolled peers. Preserve all config outside the
-  marked block. Save atomically and apply only managed live changes via wgctrl.
-- One process per interface and one mutation mutex. Failed changes are retryable;
-  startup reconciles assignments and pending removals. No interface restart.
+- One private IPv4 interface subnet (/16–/30), automatic /32 allocation from
+  live peers and SQLite assignments; no pool override. No wg-quick/networkd
+  peer file writes.
+- SQLite is authoritative for enrolled peers; `--rehydrate` applies them live
+  after boot. Pair/unpair/`--remove` apply mutations via wgctrl.
+- `--init` exclusively creates a database for an empty device and never overwrites
+  an existing file. Every other mode requires an initialized database; no automatic
+  creation on startup or rehydrate.
+- One process per interface and one mutation mutex. Failed changes are retryable.
 - Unpair deletes the assignment and journals live removal until applied. Phone
   deletion uses the version 1 public QR and per-peer HMAC. Admin deletion uses
-  `--remove` by public key, or by label when unique. No offline client queue.
-- Existing peers are never adopted or removed. Unsupported external edits,
-  database loss and layout changes are documented in README LIMITATIONS.
+  `--remove` by WireGuard public key only. No offline client queue.
 
 ## iPhone
 

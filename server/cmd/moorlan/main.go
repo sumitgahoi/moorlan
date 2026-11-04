@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
@@ -17,7 +16,6 @@ import (
 	"moorlan/internal/payload"
 	"moorlan/internal/qr"
 	"moorlan/internal/runtime"
-	"moorlan/internal/settings"
 )
 
 func main() {
@@ -28,52 +26,43 @@ func main() {
 }
 
 func run() error {
-	cfgPath, fileCfg, err := settings.Resolve(peekConfigPath(os.Args[1:]))
-	if err != nil {
-		return err
-	}
-
+	initialize := flag.Bool("init", false, "create the SQLite database for an empty moorlanN device and exit")
 	unpair := flag.Bool("unpair", false, "show an unpair QR and accept deletion requests only")
-	remove := flag.String("remove", "", "remove a managed peer by public key (or unique label) and exit")
-	config := flag.String("config", "", "path to moorlan.conf (default: ./moorlan.conf or next to the binary)")
-	wgDefault := "wg0"
-	if fileCfg.WG != "" {
-		wgDefault = fileCfg.WG
-	}
-	wg := flag.String("wg", wgDefault, "existing WireGuard interface (Linux)")
-	wgConf := flag.String("wg-conf", fileCfg.WGConf, "wg-quick config path (default /etc/wireguard/<wg>.conf)")
-	privateEndpoint := flag.String("private-endpoint", fileCfg.PrivateEndpoint, "LAN HTTP control address host:port (required; host must be configured here)")
-	homeCIDRs := flag.String("home-cidrs", fileCfg.HomeCIDRs, "home IPv4 CIDR(s) for split-tunnel routes when away (required; comma-separated OK)")
-	publicEndpoint := flag.String("public-endpoint", fileCfg.PublicEndpoint, "public WireGuard host:port; overrides STUN discovery (e.g. DDNS)")
+	remove := flag.String("remove", "", "remove a managed peer by WireGuard public key and exit")
+	rehydrate := flag.Bool("rehydrate", false, "apply SQLite peers onto the live moorlanN device and exit")
+	wg := flag.String("wg", "moorlan0", "WireGuard interface (must be moorlan0, moorlan1, …)")
+	db := flag.String("db", "", "SQLite path (default /var/lib/moorlan/<wg>.db)")
+	privateEndpoint := flag.String("private-endpoint", "", "LAN HTTP control address host:port (required for pair/unpair)")
+	homeCIDRs := flag.String("home-cidrs", "", "home IPv4 CIDR(s) for split-tunnel routes when away (required for pair/unpair)")
+	publicEndpoint := flag.String("public-endpoint", "", "public WireGuard host:port; overrides STUN discovery (e.g. DDNS)")
 	flag.Usage = func() {
-		fmt.Fprintln(flag.CommandLine.Output(), "Usage: moorlan [-config moorlan.conf] [-private-endpoint host:port] [-home-cidrs CIDR[,CIDR...]] [--unpair | --remove label] [-wg wg0] [-public-endpoint host:port]\n\nOptions:")
-		for _, advanced := range []bool{false, true} {
-			if advanced {
-				fmt.Fprintln(flag.CommandLine.Output(), "\nAdvanced options:")
-			}
-			flag.VisitAll(func(f *flag.Flag) {
-				isAdvanced := f.Name != "wg" && f.Name != "public-endpoint" && f.Name != "unpair" && f.Name != "remove" && f.Name != "private-endpoint" && f.Name != "home-cidrs" && f.Name != "config"
-				if isAdvanced == advanced {
-					fmt.Fprintf(flag.CommandLine.Output(), "  -%s (default %q)\n      %s\n", f.Name, f.DefValue, f.Usage)
-				}
-			})
-		}
+		fmt.Fprintln(flag.CommandLine.Output(), "Usage: moorlan [-wg moorlan0] [-private-endpoint host:port] [-home-cidrs CIDR[,CIDR...]] [--init | --rehydrate | --unpair | --remove <pubkey>] [-public-endpoint host:port]\n\nOptions:")
+		flag.PrintDefaults()
 	}
 	flag.Parse()
-	_ = config // registered for usage/-h; path was resolved from argv before Parse
 	if os.Geteuid() != 0 {
 		return fmt.Errorf("must run as root (try: sudo ./moorlan)")
 	}
-	if *unpair && *remove != "" {
-		return fmt.Errorf("use either --unpair or --remove, not both")
+	modes := 0
+	if *initialize {
+		modes++
 	}
-	if !*unpair && *remove == "" && *publicEndpoint != "" {
+	if *unpair {
+		modes++
+	}
+	if *remove != "" {
+		modes++
+	}
+	if *rehydrate {
+		modes++
+	}
+	if modes > 1 {
+		return fmt.Errorf("use only one of --init, --rehydrate, --unpair, or --remove")
+	}
+	if !*initialize && !*unpair && *remove == "" && !*rehydrate && *publicEndpoint != "" {
 		if _, _, err := payload.SplitEndpoint(*publicEndpoint); err != nil {
 			return err
 		}
-	}
-	if cfgPath != "" {
-		fmt.Printf("config     %s\n", cfgPath)
 	}
 	release, err := runtime.LockInterface(*wg)
 	if err != nil {
@@ -83,16 +72,30 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if *remove != "" {
-		host, err := runtime.DiscoverUnpair(*wg, *wgConf, *privateEndpoint, *homeCIDRs)
+	if *initialize || *rehydrate || *remove != "" {
+		host, err := runtime.DiscoverDevice(*wg, *db)
 		if err != nil {
 			return err
+		}
+		if *initialize {
+			if err := runtime.InitDatabase(ctx, host); err != nil {
+				return err
+			}
+			fmt.Printf("initialized %s for %s\n", host.StorePath, host.Snap.Name)
+			return nil
 		}
 		assigner, err := runtime.OpenAssigner(ctx, host)
 		if err != nil {
 			return err
 		}
 		defer assigner.Close()
+		if *rehydrate {
+			if err := assigner.Reconcile(ctx); err != nil {
+				return err
+			}
+			fmt.Printf("rehydrated %s from %s\n", host.Snap.Name, host.StorePath)
+			return nil
+		}
 		removed, err := assigner.RemoveManaged(ctx, *remove)
 		if err != nil {
 			return err
@@ -103,9 +106,9 @@ func run() error {
 
 	var host runtime.Host
 	if *unpair {
-		host, err = runtime.DiscoverUnpair(*wg, *wgConf, *privateEndpoint, *homeCIDRs)
+		host, err = runtime.DiscoverUnpair(*wg, *db, *privateEndpoint, *homeCIDRs)
 	} else {
-		host, err = runtime.Discover(*wg, *wgConf, *privateEndpoint, *homeCIDRs, *publicEndpoint)
+		host, err = runtime.Discover(*wg, *db, *privateEndpoint, *homeCIDRs, *publicEndpoint)
 	}
 	if err != nil {
 		return err
@@ -150,13 +153,12 @@ func run() error {
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       30 * time.Second,
 	}
-	// Bind before displaying the invitation, so the QR never advertises a failed listener.
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("cannot listen on %s: %w", addr, err)
 	}
 	defer listener.Close()
-	fmt.Printf("interface  %s\nprivate    %s\nhome CIDRs %s\nservice    %s\n", host.Snap.Name, addr, host.HomeCIDRLease(), controlURL)
+	fmt.Printf("interface  %s\ndatabase   %s\nprivate    %s\nhome CIDRs %s\nservice    %s\n", host.Snap.Name, host.StorePath, addr, host.HomeCIDRLease(), controlURL)
 	if err := qr.WriteANSI(os.Stdout, text); err != nil {
 		return err
 	}
@@ -182,21 +184,4 @@ func run() error {
 		}
 		return err
 	}
-}
-
-func peekConfigPath(args []string) string {
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		switch {
-		case arg == "-config" || arg == "--config":
-			if i+1 < len(args) {
-				return args[i+1]
-			}
-		case strings.HasPrefix(arg, "-config="):
-			return strings.TrimPrefix(arg, "-config=")
-		case strings.HasPrefix(arg, "--config="):
-			return strings.TrimPrefix(arg, "--config=")
-		}
-	}
-	return ""
 }
