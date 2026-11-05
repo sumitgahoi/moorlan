@@ -46,6 +46,7 @@ func run() error {
 	privateEndpoint := fs.String("private-endpoint", "", "override conf: LAN HTTP host:port")
 	homeCIDRs := fs.String("home-cidrs", "", "override conf: home IPv4 CIDR(s)")
 	publicEndpoint := fs.String("public-endpoint", "", "override conf: public WireGuard host:port")
+	dns := fs.String("dns", "", "override conf: home DNS IPv4 address(es)")
 	fs.Usage = printUsage
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		if err == flag.ErrHelp {
@@ -84,13 +85,13 @@ func run() error {
 	}
 
 	if *addIface != "" {
-		return runAddInterface(*addIface, *db, *privateEndpoint, *homeCIDRs, *publicEndpoint)
+		return runAddInterface(*addIface, *db, *privateEndpoint, *homeCIDRs, *publicEndpoint, *dns)
 	}
 	if *removeIface != "" {
 		return runRemoveInterface(*removeIface)
 	}
 
-	site, err := resolveSite(*wg, *db, *privateEndpoint, *homeCIDRs, *publicEndpoint, explicit)
+	site, err := resolveSite(*wg, *db, *privateEndpoint, *homeCIDRs, *publicEndpoint, *dns, explicit)
 	if err != nil {
 		return err
 	}
@@ -152,7 +153,7 @@ func run() error {
 	if *unpair {
 		host, err = runtime.DiscoverUnpair(site.WG, site.DB, site.PrivateEndpoint)
 	} else {
-		host, err = runtime.Discover(site.WG, site.DB, site.PrivateEndpoint, site.HomeCIDRs, site.PublicEndpoint)
+		host, err = runtime.Discover(site.WG, site.DB, site.PrivateEndpoint, site.HomeCIDRs, site.PublicEndpoint, site.DNS)
 	}
 	if err != nil {
 		return err
@@ -195,7 +196,11 @@ func run() error {
 		return fmt.Errorf("cannot listen on %s: %w", addr, err)
 	}
 	defer listener.Close()
-	fmt.Printf("interface  %s\ndatabase   %s\nprivate    %s\nhome CIDRs %s\nservice    %s\n", host.Snap.Name, host.StorePath, addr, host.HomeCIDRLease(), controlURL)
+	fmt.Printf("interface  %s\ndatabase   %s\nprivate    %s\nhome CIDRs %s\n", host.Snap.Name, host.StorePath, addr, host.HomeCIDRLease())
+	if len(host.DNS) > 0 {
+		fmt.Printf("dns        %s\n", strings.Join(host.DNS, ","))
+	}
+	fmt.Printf("service    %s\n", controlURL)
 	if err := qr.WriteANSI(os.Stdout, text); err != nil {
 		return err
 	}
@@ -246,6 +251,7 @@ Peers live in SQLite. Default -wg is wg0 when only one name is needed.
   -private-endpoint    LAN HTTP host:port (required for --add-interface / --pair)
   -home-cidrs          home IPv4 CIDR(s) (required for --add-interface / --pair)
   -public-endpoint     public WireGuard DDNS or static host:port (required for --add-interface / --pair)
+  -dns                 optional DNS IPv4 address(es): tunnel IP or inside home-cidrs
 `)
 }
 
@@ -270,7 +276,7 @@ func printPeers(ctx context.Context, assigner *runtime.Assigner) error {
 	return w.Flush()
 }
 
-func resolveSite(wg, db, privateEndpoint, homeCIDRs, publicEndpoint string, explicit map[string]bool) (settings.Site, error) {
+func resolveSite(wg, db, privateEndpoint, homeCIDRs, publicEndpoint, dns string, explicit map[string]bool) (settings.Site, error) {
 	iface := "wg0"
 	if explicit["wg"] {
 		iface = wg
@@ -298,6 +304,7 @@ func resolveSite(wg, db, privateEndpoint, homeCIDRs, publicEndpoint string, expl
 		PrivateEndpoint: privateEndpoint,
 		HomeCIDRs:       homeCIDRs,
 		PublicEndpoint:  publicEndpoint,
+		DNS:             dns,
 	}
 	site := settings.Apply(conf, flags, explicit)
 	if !explicit["wg"] {
@@ -325,7 +332,7 @@ func requirePairSettings(site *settings.Site, unpairOnly bool) error {
 	return nil
 }
 
-func runAddInterface(iface, db, privateEndpoint, homeCIDRs, publicEndpoint string) error {
+func runAddInterface(iface, db, privateEndpoint, homeCIDRs, publicEndpoint, dns string) error {
 	if err := runtime.ValidateInterfaceName(iface); err != nil {
 		return err
 	}
@@ -358,21 +365,22 @@ func runAddInterface(iface, db, privateEndpoint, homeCIDRs, publicEndpoint strin
 		return err
 	}
 
-	site := settings.Site{WG: iface, DB: storePath, PrivateEndpoint: privateEndpoint, HomeCIDRs: homeCIDRs, PublicEndpoint: publicEndpoint}
+	site := settings.Site{WG: iface, DB: storePath, PrivateEndpoint: privateEndpoint, HomeCIDRs: homeCIDRs, PublicEndpoint: publicEndpoint, DNS: dns}
 	if site.PrivateEndpoint == "" || site.HomeCIDRs == "" || site.PublicEndpoint == "" {
 		release()
 		return fmt.Errorf(`--add-interface requires flags (values are written to %s), for example:
   sudo moorlan --add-interface %s \
     -private-endpoint 10.10.10.1:8756 \
     -home-cidrs 10.10.0.0/24,10.10.10.0/24 \
-    -public-endpoint vpn.example.com:51820`, settings.Path(iface), iface)
+    -public-endpoint vpn.example.com:51820
+  # optional: -dns 10.10.10.1`, settings.Path(iface), iface)
 	}
 	if _, _, err := payload.SplitEndpoint(site.PublicEndpoint); err != nil {
 		release()
 		return fmt.Errorf("public-endpoint: %w", err)
 	}
 
-	host, err := runtime.Discover(iface, storePath, site.PrivateEndpoint, site.HomeCIDRs, site.PublicEndpoint)
+	host, err := runtime.Discover(iface, storePath, site.PrivateEndpoint, site.HomeCIDRs, site.PublicEndpoint, site.DNS)
 	if err != nil {
 		release()
 		return fmt.Errorf("cannot add interface: %w", err)
@@ -391,6 +399,9 @@ func runAddInterface(iface, db, privateEndpoint, homeCIDRs, publicEndpoint strin
 	fmt.Printf("wrote %s (site flags only; not a wg-quick/networkd peer file)\n", settings.Path(iface))
 	fmt.Printf("  private-endpoint=%s\n  home-cidrs=%s\n  public-endpoint=%s\n",
 		site.PrivateEndpoint, site.HomeCIDRs, site.PublicEndpoint)
+	if site.DNS != "" {
+		fmt.Printf("  dns=%s\n", site.DNS)
+	}
 
 	ctx := context.Background()
 	if err := runtime.InitDatabase(ctx, host); err != nil {

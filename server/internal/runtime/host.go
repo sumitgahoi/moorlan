@@ -19,14 +19,28 @@ type Host struct {
 	StorePath string
 	PairIP    string
 	HomeCIDRs []string
+	DNS       []string
 	PairHost  string
 	PairPort  int
 	Endpoint  string
 }
 
 // Discover opens an existing moorlanN device for pairing (needs pool + listen port).
-func Discover(wgName, storePath, privateEndpoint, homeCIDRs, publicEndpoint string) (Host, error) {
-	return discover(wgName, storePath, privateEndpoint, homeCIDRs, publicEndpoint, true)
+func Discover(wgName, storePath, privateEndpoint, homeCIDRs, publicEndpoint, dns string) (Host, error) {
+	host, err := discover(wgName, storePath, privateEndpoint, homeCIDRs, publicEndpoint, true)
+	if err != nil {
+		return Host{}, err
+	}
+	pool, err := iface.SelectPool(host.Snap.Addresses)
+	if err != nil {
+		return Host{}, err
+	}
+	servers, err := parseDNSServers(dns, host.HomeCIDRs, pool.Own)
+	if err != nil {
+		return Host{}, err
+	}
+	host.DNS = servers
+	return host, nil
 }
 
 // DiscoverUnpair opens the device for the unpair HTTP service.
@@ -293,6 +307,62 @@ func validateHomeCIDRs(homeCIDRs []string, tunnel *net.IPNet) error {
 		}
 	}
 	return nil
+}
+
+// parseDNSServers resolves optional lease DNS. Empty text means no DNS in the
+// lease (phone keeps its own fallback). Explicit values must be the WireGuard
+// tunnel address or lie inside home CIDRs so phones can reach them over the
+// leased routes.
+func parseDNSServers(text string, homeCIDRs []string, tunnelOwn net.IP) ([]string, error) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil, nil
+	}
+	own := tunnelOwn.To4()
+	var networks []*net.IPNet
+	for _, cidr := range homeCIDRs {
+		_, network, err := net.ParseCIDR(cidr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid home CIDR %q", cidr)
+		}
+		networks = append(networks, network)
+	}
+	var out []string
+	seen := map[string]bool{}
+	for _, part := range strings.Split(text, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		ip := net.ParseIP(part)
+		if ip == nil || ip.To4() == nil || !ip.IsPrivate() {
+			return nil, fmt.Errorf("unsupported -dns %q: use the tunnel address or a private IPv4 inside -home-cidrs", part)
+		}
+		ip = ip.To4()
+		ok := own != nil && ip.Equal(own)
+		if !ok {
+			for _, network := range networks {
+				if network.Contains(ip) {
+					ok = true
+					break
+				}
+			}
+		}
+		if !ok {
+			hint := strings.Join(homeCIDRs, ",")
+			if own != nil {
+				return nil, fmt.Errorf("-dns %s must be the WireGuard tunnel address (%s) or inside -home-cidrs (%s)", ip, own, hint)
+			}
+			return nil, fmt.Errorf("-dns %s must be inside -home-cidrs (%s)", ip, hint)
+		}
+		addr := ip.String()
+		if seen[addr] {
+			continue
+		}
+		seen[addr] = true
+		out = append(out, addr)
+	}
+	return out, nil
 }
 
 func devicePeers(device *wgtypes.Device) []iface.Peer {

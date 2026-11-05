@@ -33,7 +33,9 @@
 - `--add-interface` requires `-private-endpoint`, `-home-cidrs`, and
   `-public-endpoint` flags (no interactive prompts); writes them to the site
   conf, creates a new database for an empty device, and never adopts an existing
-  DB. `--pair`/`--unpair` require an existing site conf.
+  DB. Optional `-dns` (tunnel IP or private IPv4 inside home CIDRs) is returned
+  on the pair lease when set; if omitted, the phone keeps its exit-mode
+  Cloudflare fallback. `--pair`/`--unpair` require an existing site conf.
 - One process per interface and one mutation mutex. Failed changes are retryable.
 - Unpair deletes the assignment and journals live removal until applied. Phone
   deletion uses the version 1 public QR and per-peer HMAC. Admin deletion uses

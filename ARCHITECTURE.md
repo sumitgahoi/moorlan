@@ -16,8 +16,10 @@ there is no STUN and no LAN-only public endpoint fallback.
 
 The host owns the WireGuard device configuration; after `--add-interface`, Moorlan
 owns all peers on it. Per-iface `/etc/moorlan/<iface>.conf` stores static site flags
-(private endpoint, home CIDRs, public endpoint); CLI flags override the file. Peers
-are never written there. SQLite persists public-key/address assignments before they are applied.
+(private endpoint, home CIDRs, public endpoint, DNS); CLI flags override the file. Peers
+are never written there. Optional site `dns` (tunnel IP or inside home CIDRs) is
+returned on the pair lease when set; otherwise the phone keeps its own DNS
+fallback. SQLite persists public-key/address assignments before they are applied.
 The allocator picks the lowest free /32 within one private IPv4 subnet, reserving
 live peer ranges and committed assignments. No networkd or wg-quick peer file is
 written. `--add-interface` is greenfield: refuses existing conf, DB, or rehydrate

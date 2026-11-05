@@ -68,6 +68,32 @@ func TestValidateHomeCIDRsRejectsTunnelOverlap(t *testing.T) {
 	}
 }
 
+func TestParseDNSServers(t *testing.T) {
+	home := []string{"10.10.10.0/24", "10.10.20.0/24"}
+	tunnel := net.ParseIP("10.8.0.1").To4()
+	got, err := parseDNSServers("", home, tunnel)
+	if err != nil || got != nil {
+		t.Fatalf("empty dns should omit: %v %v", got, err)
+	}
+	got, err = parseDNSServers("10.10.10.1, 10.10.20.53,10.10.10.1", home, tunnel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0] != "10.10.10.1" || got[1] != "10.10.20.53" {
+		t.Fatalf("%v", got)
+	}
+	got, err = parseDNSServers("10.8.0.1", home, tunnel)
+	if err != nil || len(got) != 1 || got[0] != "10.8.0.1" {
+		t.Fatalf("explicit tunnel dns: %v %v", got, err)
+	}
+	if _, err := parseDNSServers("1.1.1.1", home, tunnel); err == nil {
+		t.Fatal("public dns accepted")
+	}
+	if _, err := parseDNSServers("10.10.30.1", home, tunnel); err == nil {
+		t.Fatal("dns outside home-cidrs accepted")
+	}
+}
+
 func TestHostLeaseHelpers(t *testing.T) {
 	h := Host{HomeCIDRs: []string{"10.10.10.0/24", "10.10.20.0/24"}}
 	if got := h.HomeCIDRLease(); got != "10.10.10.0/24,10.10.20.0/24" {

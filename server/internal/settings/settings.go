@@ -21,6 +21,7 @@ type Site struct {
 	PrivateEndpoint string
 	HomeCIDRs       string
 	PublicEndpoint  string
+	DNS             string
 }
 
 // Path returns /etc/moorlan/<iface>.conf.
@@ -96,10 +97,12 @@ func Load(iface string) (Site, error) {
 			site.HomeCIDRs = value
 		case "public-endpoint":
 			site.PublicEndpoint = value
+		case "dns":
+			site.DNS = value
 		case "unit":
 			// Obsolete: rehydrate units no longer depend on networkd vs wg-quick.
 		default:
-			return Site{}, fmt.Errorf("%s:%d: unknown key %q (allowed: wg, db, private-endpoint, home-cidrs, public-endpoint)", path, lineNo, key)
+			return Site{}, fmt.Errorf("%s:%d: unknown key %q (allowed: wg, db, private-endpoint, home-cidrs, public-endpoint, dns)", path, lineNo, key)
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -137,6 +140,9 @@ func Save(site Site) error {
 	if site.PublicEndpoint != "" {
 		fmt.Fprintf(&b, "public-endpoint=%s\n", site.PublicEndpoint)
 	}
+	if site.DNS != "" {
+		fmt.Fprintf(&b, "dns=%s\n", site.DNS)
+	}
 	path := Path(site.WG)
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, []byte(b.String()), 0o600); err != nil {
@@ -165,6 +171,9 @@ func Apply(conf, flags Site, explicit map[string]bool) Site {
 	}
 	if explicit["public-endpoint"] {
 		out.PublicEndpoint = flags.PublicEndpoint
+	}
+	if explicit["dns"] {
+		out.DNS = flags.DNS
 	}
 	return out
 }

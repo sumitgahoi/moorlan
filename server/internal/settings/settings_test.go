@@ -14,6 +14,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 		PrivateEndpoint: "10.10.10.1:8756",
 		HomeCIDRs:       "10.10.0.0/24,10.10.10.0/24",
 		PublicEndpoint:  "vpn.example:51820",
+		DNS:             "10.10.10.1",
 	}
 	if err := Save(site); err != nil {
 		t.Fatal(err)
