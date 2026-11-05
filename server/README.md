@@ -12,8 +12,8 @@ your private network. There is **no invitation token, no TLS, and no LAN
 authentication**. While `--pair` is running, **anyone who can reach
 `private-endpoint` can enroll**. Security is deliberately lax so setup stays
 simple for a household. Do not publish the pairing port, and do not leave
-`--pair` / `--unpair` running on guest or untrusted networks. Stop those modes
-when finished.
+`--pair` / `--unpair` running on guest or untrusted networks. Those modes stop
+after 2 minutes with no successful enroll/unpair (or Ctrl-C sooner).
 
 ## Supported setup
 
@@ -112,7 +112,7 @@ public-endpoint=vpn.example.com:51820
 | --- | --- |
 | `--add-interface <iface>` | Greenfield: requires `-private-endpoint`, `-home-cidrs`, `-public-endpoint`; writes conf + DB + unit |
 | `--remove-interface <iface>` | Disable+delete unit, conf, and empty DB (refuses if peers remain) |
-| `--pair` / `--unpair` | Enrollment / unpair QR (reconcile first; require conf) |
+| `--pair` / `--unpair` | Enrollment / unpair QR; idle-stop after 2m with no success |
 | `--list-peers` | Print enrolled peers: label, public key, address |
 | `--remove-peer <pubkey>` | Admin revoke by device public key (reconcile first) |
 | `--rehydrate` | Boot path: one attempt; fails until WG is usable; systemd retries |
@@ -163,11 +163,12 @@ Admin: `sudo moorlan --remove-peer <device-public-key>`.
 
 ## LIMITATIONS
 
-- Trusted-LAN HTTP only; stop pairing/unpair when finished.
+- Trusted-LAN HTTP only; `--pair` / `--unpair` idle-stop after 2m with no success.
 - One private IPv4 tunnel subnet `/16`–`/30` per interface.
 - Database is created only by `--add-interface` (never adopted).
 - Do not change the WireGuard server private key under an existing peer DB.
-- Do not replace a lost peer DB while phones still hold leases; unpair/`--remove-peer` or re-pair.
+- If the peer DB is missing or unreadable: clear live peers, `--remove-interface`,
+  `--add-interface`, and re-pair (or unpair/`--remove-peer` first while the DB works).
 - No offline deletion queue; no STUN / UPnP / relay. Sticky `public-endpoint` is required.
 - Rehydrate units expect the binary at `/usr/local/bin/moorlan`.
 

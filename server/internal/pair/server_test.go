@@ -39,7 +39,7 @@ func deletePeer(handler http.Handler, key, credential string) int {
 }
 func TestMultipleDevicesAndRetriesNeedNoInvitationToken(t *testing.T) {
 	assign := &fakeAssigner{}
-	handler := New(assign)
+	handler := New(assign, nil)
 	results := make(chan int, 2)
 	for _, key := range []byte{1, 2} {
 		go func(key byte) { results <- post(handler, body(testKey(key))) }(key)
@@ -58,7 +58,7 @@ func TestMultipleDevicesAndRetriesNeedNoInvitationToken(t *testing.T) {
 }
 func TestAssignmentFailureCanBeRetried(t *testing.T) {
 	assign := &fakeAssigner{err: errors.New("disk failure")}
-	handler := New(assign)
+	handler := New(assign, nil)
 	if got := post(handler, body(testKey(1))); got != 500 {
 		t.Fatal(got)
 	}
@@ -69,7 +69,7 @@ func TestAssignmentFailureCanBeRetried(t *testing.T) {
 }
 func TestRejectMalformedAndOversizedRequests(t *testing.T) {
 	assign := &fakeAssigner{}
-	handler := New(assign)
+	handler := New(assign, nil)
 	for _, request := range []string{`{`, body(testKey(1)) + `{}`, `{"extra":true}`, body(testKey(0)), body(strings.Repeat("a", 5000)), `{"public_key":"` + testKey(1) + `"}`, `{"public_key":"` + testKey(1) + `","label":""}`} {
 		if got := post(handler, request); got != 400 {
 			t.Fatal(got)
@@ -81,7 +81,7 @@ func TestRejectMalformedAndOversizedRequests(t *testing.T) {
 }
 func TestUnpairCredentialsAndUnpairOnlyMode(t *testing.T) {
 	assign := &fakeAssigner{}
-	for _, handler := range []http.Handler{New(assign), NewUnpairOnly(assign)} {
+	for _, handler := range []http.Handler{New(assign, nil), NewUnpairOnly(assign, nil)} {
 		if got := deletePeer(handler, testKey(1), "credential"); got != 204 {
 			t.Fatal(got)
 		}
@@ -98,7 +98,7 @@ func TestUnpairCredentialsAndUnpairOnlyMode(t *testing.T) {
 			t.Fatal(got)
 		}
 	}
-	if got := post(NewUnpairOnly(assign), body(testKey(1))); got != 405 {
+	if got := post(NewUnpairOnly(assign, nil), body(testKey(1))); got != 405 {
 		t.Fatal(got)
 	}
 }

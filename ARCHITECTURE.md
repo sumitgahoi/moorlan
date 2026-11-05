@@ -9,8 +9,9 @@ for setup and protocol details.
 Go net reads LAN/interface addresses and MTU. wgctrl reads/configures the existing
 WireGuard interface. Pairing uses trusted-LAN HTTP and a version 1 QR containing
 the LAN URL and server public key. Request and response bodies are plaintext JSON.
-No invitation token or expiry; multiple devices can enroll until the admin stops
-the process. A sticky `public-endpoint` (DDNS or static host:port) is required;
+No invitation token; multiple devices can enroll while `--pair` runs. The process
+idle-stops after 2 minutes with no successful enroll/unpair (Ctrl-C sooner).
+A sticky `public-endpoint` (DDNS or static host:port) is required;
 there is no STUN and no LAN-only public endpoint fallback.
 
 The host owns the WireGuard device configuration; after `--add-interface`, Moorlan

@@ -37,10 +37,9 @@ type request struct {
 	Label     string `json:"label"`
 }
 
-// Enrollment is open to trusted LAN users for the lifetime of the process.
-// Assigner serializes mutations; the HTTP layer holds no additional mutex.
-// Bodies are plaintext JSON on the trusted LAN (see README LIMITATIONS).
-func New(assign Assigner) http.Handler {
+// New serves enrollment and unpair. onSuccess runs after HTTP 2xx mutations only
+// (nil is fine). Bodies are plaintext JSON on the trusted LAN (see README).
+func New(assign Assigner, onSuccess func()) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/pair", func(w http.ResponseWriter, r *http.Request) {
 		var body request
@@ -72,20 +71,25 @@ func New(assign Assigner) http.Handler {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(lease)
+		if err := json.NewEncoder(w).Encode(lease); err != nil {
+			return
+		}
+		if onSuccess != nil {
+			onSuccess()
+		}
 	})
-	mux.HandleFunc("DELETE /v1/pair", unpairHandler(assign.Remove))
+	mux.HandleFunc("DELETE /v1/pair", unpairHandler(assign.Remove, onSuccess))
 	return mux
 }
 
 // NewUnpairOnly never registers the enrollment route, even with a valid token.
-func NewUnpairOnly(assign Assigner) http.Handler {
+func NewUnpairOnly(assign Assigner, onSuccess func()) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("DELETE /v1/pair", unpairHandler(assign.Remove))
+	mux.HandleFunc("DELETE /v1/pair", unpairHandler(assign.Remove, onSuccess))
 	return mux
 }
 
-func unpairHandler(remove func(context.Context, string, string) error) http.HandlerFunc {
+func unpairHandler(remove func(context.Context, string, string) error, onSuccess func()) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			PublicKey   string `json:"public_key"`
@@ -118,6 +122,9 @@ func unpairHandler(remove func(context.Context, string, string) error) http.Hand
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
+		if onSuccess != nil {
+			onSuccess()
+		}
 	}
 }
 

@@ -167,15 +167,17 @@ func run() error {
 	if err := assigner.Reconcile(ctx); err != nil {
 		return fmt.Errorf("reconcile before serving: %w", err)
 	}
+	idle := pair.NewIdle(pair.DefaultIdle)
+	defer idle.Stop()
 	var text string
 	var handler http.Handler
 	if *unpair {
 		text, err = payload.MarshalUnpair(payload.UnpairCard{V: 1, Action: "unpair", ServerPublicKey: host.Snap.PublicKey, UnpairURL: controlURL})
-		handler = pair.NewUnpairOnly(assigner)
+		handler = pair.NewUnpairOnly(assigner, idle.Touch)
 	} else {
 		fmt.Printf("public     %s\n", host.Endpoint)
 		text, err = payload.Marshal(payload.Card{V: 1, PairURL: controlURL, ServerPublicKey: host.Snap.PublicKey})
-		handler = pair.New(assigner)
+		handler = pair.New(assigner, idle.Touch)
 	}
 	if err != nil {
 		return err
@@ -198,14 +200,13 @@ func run() error {
 		return err
 	}
 	if *unpair {
-		fmt.Println("\nScan with an already-paired device on home Wi‑Fi to unpair.\nDeletion only; the device must provide its saved credential. Ctrl-C stops the service.")
+		fmt.Printf("\nScan with an already-paired device on home Wi‑Fi to unpair.\nDeletion only; the device must provide its saved credential.\nStops after %s with no successful unpair (Ctrl-C sooner).\n", pair.DefaultIdle)
 	} else {
-		fmt.Println("\nScan on the trusted home LAN to add devices. Enrollment stays open until Ctrl-C.\nAnyone who can reach this service can enroll while it is running.")
+		fmt.Printf("\nScan on the trusted home LAN to add devices.\nAnyone who can reach this service can enroll while it is running.\nStops after %s with no successful pair (Ctrl-C sooner).\n", pair.DefaultIdle)
 	}
 	errCh := make(chan error, 1)
 	go func() { errCh <- server.Serve(listener) }()
-	select {
-	case <-ctx.Done():
+	shutdownHTTP := func() error {
 		shutdown, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
 		if err := server.Shutdown(shutdown); err != nil {
@@ -213,7 +214,16 @@ func run() error {
 			return err
 		}
 		return nil
+	}
+	select {
+	case <-ctx.Done():
+		idle.Stop()
+		return shutdownHTTP()
+	case <-idle.Done():
+		fmt.Printf("\nmoorlan: idle for %s; stopping\n", pair.DefaultIdle)
+		return shutdownHTTP()
 	case err := <-errCh:
+		idle.Stop()
 		if err == http.ErrServerClosed {
 			return nil
 		}

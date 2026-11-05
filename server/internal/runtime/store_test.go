@@ -59,8 +59,12 @@ func TestInitStoreDoesNotOverwriteOrAdoptExistingFiles(t *testing.T) {
 
 func TestInitStoreRefusesLivePeers(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "moorlan0.db")
-	if err := initStore(path, wgtypes.Key{2}.String(), 1); err == nil {
+	err := initStore(path, wgtypes.Key{2}.String(), 1)
+	if err == nil {
 		t.Fatal("initialized while live peers exist")
+	}
+	if !strings.Contains(err.Error(), "remove them") || !strings.Contains(err.Error(), "pair through the app") {
+		t.Fatalf("live peer error: %v", err)
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("created database: %v", err)

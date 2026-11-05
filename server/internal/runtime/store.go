@@ -17,7 +17,7 @@ type peerStore struct{ db *sql.DB }
 // initStore exclusively creates a new database; it never replaces existing state.
 func initStore(path, serverKey string, livePeers int) error {
 	if livePeers != 0 {
-		return fmt.Errorf("cannot initialize database while the WireGuard interface has %d live peer(s); restore the original database", livePeers)
+		return fmt.Errorf("cannot initialize database while the WireGuard interface has %d live peer(s); remove them, then pair through the app", livePeers)
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
@@ -68,7 +68,7 @@ func connectStore(path string) (*sql.DB, error) {
 	file, err := os.OpenFile(path, os.O_RDWR, 0)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("database %s does not exist; run --add-interface for first-time setup, or restore the original database", path)
+			return nil, fmt.Errorf("database %s does not exist; run --add-interface", path)
 		}
 		return nil, err
 	}
@@ -104,7 +104,7 @@ func openStore(path, serverKey string) (*peerStore, error) {
 	var storedKey string
 	err = db.QueryRow("SELECT server_key FROM metadata LIMIT 1").Scan(&storedKey)
 	if err != nil {
-		return fail(fmt.Errorf("database %s is not initialized or cannot be read; restore the original database: %w", path, err))
+		return fail(fmt.Errorf("database %s is not initialized or cannot be read; run --remove-interface then --add-interface and re-pair: %w", path, err))
 	}
 	if storedKey != serverKey {
 		return fail(fmt.Errorf("WireGuard server key changed; database belongs to a different server identity"))

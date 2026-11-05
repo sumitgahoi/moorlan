@@ -15,8 +15,8 @@ your private network with **no invitation token, no TLS, and no LAN
 authentication**. While `moorlan --pair` is running, **anyone who can reach the
 control address can enroll a device**. That is deliberate: security is lax by
 design so a household setup stays simple. Do not expose the pairing port to the
-Internet, untrusted VLANs, or guest Wi‑Fi. Stop `--pair` / `--unpair` when you
-are done.
+Internet, untrusted VLANs, or guest Wi‑Fi. `--pair` / `--unpair` stop after 2
+minutes with no successful enroll/unpair (or Ctrl-C sooner).
 
 ## Quick start
 
@@ -103,9 +103,10 @@ owns all peers on it after `--add-interface`. Put the release binary at
 `--add-interface` is greenfield only. A sticky `public-endpoint` (DDNS or static)
 is required.
 
-Do not change the WireGuard server private key under an existing peer DB, and do
-not restore a lost DB from scratch while phones still hold leases — re-pair or
-`--remove-peer` as needed.
+Do not change the WireGuard server private key under an existing peer DB. If the
+peer DB is missing or unreadable, clear live peers, `--remove-interface`,
+`--add-interface`, and re-pair phones (or `--remove-peer` first while the DB
+still works).
 
 Native iPhone signing,
 capabilities, and store distribution remain outside this repository.
