@@ -30,8 +30,10 @@
 - SQLite is authoritative for enrolled peers; boot `--rehydrate` applies them
   live (one attempt; systemd retries while the WG device is not yet usable).
   Pair/unpair/`--remove-peer` reconcile before work, then mutate via wgctrl.
-- `--add-interface` creates a new database for an empty device and never adopts
-  an existing DB. `--pair`/`--unpair` require an existing site conf.
+- `--add-interface` requires `-private-endpoint`, `-home-cidrs`, and
+  `-public-endpoint` flags (no interactive prompts); writes them to the site
+  conf, creates a new database for an empty device, and never adopts an existing
+  DB. `--pair`/`--unpair` require an existing site conf.
 - One process per interface and one mutation mutex. Failed changes are retryable.
 - Unpair deletes the assignment and journals live removal until applied. Phone
   deletion uses the version 1 public QR and per-peer HMAC. Admin deletion uses

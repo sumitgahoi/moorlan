@@ -23,19 +23,25 @@ are done.
 On the Linux server, bring up an empty WireGuard device (e.g. `wg0`), then:
 
 ```bash
-TAG=v0.1.0  # pick a release tag
 ARCH=amd64  # or arm64
 ASSET="moorlan-linux-${ARCH}"
-BASE="https://github.com/sumitgahoi/moorlan/releases/download/${TAG}"
+BASE="https://github.com/sumitgahoi/moorlan/releases/latest/download"
 
 curl -fsSL -o "${ASSET}" "${BASE}/${ASSET}"
 curl -fsSL -o "${ASSET}.sha256" "${BASE}/${ASSET}.sha256"
 sha256sum -c "${ASSET}.sha256"
 sudo install -m 755 "${ASSET}" /usr/local/bin/moorlan
 
-sudo moorlan --add-interface wg0   # site conf + peer DB + rehydrate unit
-sudo moorlan --pair                # enrollment QR (home Wi‑Fi)
+# Copy, edit the three -flags for your network, then paste:
+sudo moorlan --add-interface wg0 \
+  -private-endpoint 10.10.10.1:8756 \
+  -home-cidrs 10.10.0.0/24,10.10.10.0/24 \
+  -public-endpoint vpn.example.com:51820
+
+sudo moorlan --pair   # enrollment QR (home Wi‑Fi); reads /etc/moorlan/wg0.conf
 ```
+
+To pin a release, use `…/releases/download/vX.Y.Z/…` instead of `…/releases/latest/download/…`.
 
 Or build from source: `cd server && go build -o moorlan ./cmd/moorlan` and
 `sudo install -m 755 moorlan /usr/local/bin/moorlan`. See [server/README.md](server/README.md).

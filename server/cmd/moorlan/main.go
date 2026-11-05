@@ -233,9 +233,9 @@ Peers live in SQLite. Default -wg is wg0 when only one name is needed.
 
   -wg                  WireGuard interface (default wg0; auto-picks sole conf if present)
   -db                  SQLite path override
-  -private-endpoint    LAN HTTP host:port
-  -home-cidrs          home IPv4 CIDR(s)
-  -public-endpoint     public WireGuard DDNS or static host:port (required)
+  -private-endpoint    LAN HTTP host:port (required for --add-interface / --pair)
+  -home-cidrs          home IPv4 CIDR(s) (required for --add-interface / --pair)
+  -public-endpoint     public WireGuard DDNS or static host:port (required for --add-interface / --pair)
 `)
 }
 
@@ -349,19 +349,18 @@ func runAddInterface(iface, db, privateEndpoint, homeCIDRs, publicEndpoint strin
 	}
 
 	site := settings.Site{WG: iface, DB: storePath, PrivateEndpoint: privateEndpoint, HomeCIDRs: homeCIDRs, PublicEndpoint: publicEndpoint}
-	if err := settings.PromptMissing(&site, []string{"private-endpoint", "home-cidrs", "public-endpoint"}, os.Stdin, os.Stderr); err != nil {
-		release()
-		return err
-	}
 	if site.PrivateEndpoint == "" || site.HomeCIDRs == "" || site.PublicEndpoint == "" {
 		release()
-		return fmt.Errorf("--add-interface needs private-endpoint, home-cidrs, and public-endpoint (flags or interactive TTY)")
+		return fmt.Errorf(`--add-interface requires flags (values are written to %s), for example:
+  sudo moorlan --add-interface %s \
+    -private-endpoint 10.10.10.1:8756 \
+    -home-cidrs 10.10.0.0/24,10.10.10.0/24 \
+    -public-endpoint vpn.example.com:51820`, settings.Path(iface), iface)
 	}
 	if _, _, err := payload.SplitEndpoint(site.PublicEndpoint); err != nil {
 		release()
 		return fmt.Errorf("public-endpoint: %w", err)
 	}
-	site.DB = storePath
 
 	host, err := runtime.Discover(iface, storePath, site.PrivateEndpoint, site.HomeCIDRs, site.PublicEndpoint)
 	if err != nil {

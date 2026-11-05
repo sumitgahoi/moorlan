@@ -37,22 +37,29 @@ Moorlan owns every peer on that interface after `--add-interface`.
 Three steps: **put the binary on PATH** → **`--add-interface`** → **`--pair`**.
 
 ```bash
-TAG=v0.1.0  # pick a release tag
 ARCH=amd64  # or arm64
 ASSET="moorlan-linux-${ARCH}"
-BASE="https://github.com/sumitgahoi/moorlan/releases/download/${TAG}"
+BASE="https://github.com/sumitgahoi/moorlan/releases/latest/download"
 
 curl -fsSL -o "${ASSET}" "${BASE}/${ASSET}"
 curl -fsSL -o "${ASSET}.sha256" "${BASE}/${ASSET}.sha256"
 sha256sum -c "${ASSET}.sha256"
 sudo install -m 755 "${ASSET}" /usr/local/bin/moorlan
 
-# Add a device (prompts; Enter alone does not accept examples):
-sudo moorlan --add-interface wg0
+# Copy, edit the three -flags for your network, then paste:
+sudo moorlan --add-interface wg0 \
+  -private-endpoint 10.10.10.1:8756 \
+  -home-cidrs 10.10.0.0/24,10.10.10.0/24 \
+  -public-endpoint vpn.example.com:51820
 
 # Enroll phones (on home Wi‑Fi when scanning from the phone):
 sudo moorlan --pair
 ```
+
+`--add-interface` writes those flags into `/etc/moorlan/<iface>.conf` (plus DB and
+rehydrate unit). Later `--pair` reads the conf; edit the file or pass flags to
+override. To pin a release, use `…/releases/download/vX.Y.Z/…` instead of
+`…/releases/latest/download/…`.
 
 From source:
 
@@ -87,14 +94,15 @@ Settings: edit `/etc/moorlan/<iface>.conf`. CLI flags override the file.
 `public-endpoint` must stay a sticky DDNS or static host:port so every phone
 gets the same reachable WireGuard endpoint.
 
-### Site conf example
+### Site conf
+
+Written by `--add-interface` from the flags (not a wg-quick/networkd peer file):
 
 ```
 # Moorlan site settings for wg0 (not peers; peers live in SQLite).
-# This is not your wg-quick or networkd device file.
 wg=wg0
 private-endpoint=10.10.10.1:8756
-home-cidrs=10.10.0.0/24,10.10.10.0/24,10.10.20.0/24,10.10.30.0/24,10.10.40.0/24
+home-cidrs=10.10.0.0/24,10.10.10.0/24
 public-endpoint=vpn.example.com:51820
 ```
 
@@ -102,7 +110,7 @@ public-endpoint=vpn.example.com:51820
 
 | Command | Role |
 | --- | --- |
-| `--add-interface <iface>` | Greenfield: create conf + DB + rehydrate unit (refuses if any already exist; live peers must be zero) |
+| `--add-interface <iface>` | Greenfield: requires `-private-endpoint`, `-home-cidrs`, `-public-endpoint`; writes conf + DB + unit |
 | `--remove-interface <iface>` | Disable+delete unit, conf, and empty DB (refuses if peers remain) |
 | `--pair` / `--unpair` | Enrollment / unpair QR (reconcile first; require conf) |
 | `--list-peers` | Print enrolled peers: label, public key, address |
