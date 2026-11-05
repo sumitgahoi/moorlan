@@ -18,6 +18,7 @@ type Lease struct {
 	Prefixes            []string `json:"prefixes"`
 	LAN                 string   `json:"lan"`
 	DNS                 []string `json:"dns,omitempty"`
+	DNSSearch           []string `json:"dns_search,omitempty"`
 	PublicKey           string   `json:"public_key"`
 	Endpoint            string   `json:"endpoint"`
 	MTU                 int      `json:"mtu,omitempty"`

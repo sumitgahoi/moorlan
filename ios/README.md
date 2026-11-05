@@ -83,7 +83,7 @@ process, then explicitly run the new binary:
 ```bash
 cd /path/to/moorlan/server
 go build -o moorlan ./cmd/moorlan
-sudo ./moorlan -private-endpoint … -home-cidrs …   # device moorlan0 must already exist
+sudo moorlan --pair   # enrollment QR; requires --add-interface first; scan on home Wi‑Fi
 ```
 
 Scan the newly printed QR, not a previous screenshot. For deletion, start the
@@ -103,7 +103,12 @@ the server or change a QR already printed by an older process.
 | Unknown network | Exit node |
 
 Subnet mode includes the server-supplied tunnel prefixes and home CIDRs. Exit mode
-adds `0.0.0.0/0` and `::/0` and sends DNS through the tunnel. The Linux server/router
+adds `0.0.0.0/0` and `::/0`. When the lease includes `dns`, both modes use those
+resolvers (and optional `dns_search` like `home.arpa` for short names); otherwise
+exit mode falls back to `1.1.1.1` / `1.0.0.1`. In Settings → **Tunnel on this
+iPhone**, you can override DNS, search domains, keepalive, and MTU for this phone
+without changing the server lease (server key / endpoint / client IP stay
+read-only). AllowedIPs follow the Away default routing mode. The Linux server/router
 must support forwarding, return routes, and Internet NAT for these routes to work;
 see the server README. The current server provisions IPv4 device addresses, so it
 does not provide IPv6 Internet connectivity.
@@ -122,14 +127,11 @@ Information capability before exposing the SSID. No location coordinates are use
 A denied/unavailable Wi-Fi name never becomes a trustable interface fingerprint.
 See [Apple's fetchCurrent requirements](https://developer.apple.com/documentation/networkextension/nehotspotnetwork/fetchcurrent(completionhandler:)).
 
-**Home Wi‑Fi (tunnel off):** join each home SSID and tap **Add**. Repeat for every
-home network (for example one SSID per VLAN). Apple's on-demand rules disconnect
-on those SSIDs and reconnect away from them. Pairing also adds the current SSID
-when it is already identified.
-
-**Trusted Wi‑Fi (split when away):** tap **Trust** on a non-home named network to
-use subnet routing there in Automatic mode. Cellular starts trusted and has its
-own setting. Network transitions fetch the new Wi-Fi identity; an old SSID is not
+**Networks:** in Settings, set each named Wi‑Fi to **Home** (tunnel off),
+**Trusted** (Home LAN only in Automatic), or **Normal** (Exit Node in Automatic).
+Join the SSID first so it can be identified. Pairing also marks the current SSID
+as Home when it is already identified. Cellular starts trusted and has its own
+setting. Network transitions fetch the new Wi-Fi identity; an old SSID is not
 carried over to another association.
 
 The Packet Tunnel extension independently monitors network changes and applies
@@ -143,8 +145,11 @@ On the Linux host, start `moorlan --unpair`. On home Wi-Fi, select **Settings �
 Paired host → Delete profile** and scan its public unpair QR (the main scanner also
 accepts it). Confirm the named saved host.
 
-At pair time the app sends `UIDevice.current.name` as a server-side label for
-admin hints; admin `--remove` uses the peer public key only.
+At pair time the app sends a **device label** for admin hints (`moorlan
+--list-peers`). Set it in Settings → This iPhone. iOS 16+ returns a generic
+model name from `UIDevice.current.name` unless Apple grants a restricted
+entitlement, so the editable label is the reliable source. Re-pair to update an
+existing peer’s label; admin `--remove-peer` uses the peer public key only.
 
 The app matches the server public key, contacts the **current scanned LAN URL**,
 and supplies the saved per-peer HMAC credential in the DELETE body. After
@@ -157,22 +162,25 @@ Old pairings without an unpair credential need to pair again first.
 
 ## UI
 
-The SwiftUI shell matches Cove and Glance: Apple's native components and Human
-Interface Guidelines are the design system. Prefer system typography, semantic
-colors (`primary` / `secondary` / `Color.accentColor`), SF Symbols, standard
-navigation, inset grouped lists/forms, sheets, and controls. Do not add a custom
-theme, fonts, status orb, glass panels, or forced dark chrome unless there is a
-documented functional need.
+The SwiftUI shell uses Apple's native components and Human Interface Guidelines:
+system typography, semantic colors, SF Symbols, standard navigation, forms,
+sheets, and controls. Do not add a custom theme, fonts, glass panels, or forced
+dark chrome unless there is a documented functional need.
+
+Home is a single status composition, not a settings dump. Technical lease and
+key details live under Settings → Advanced.
 
 | Screen | Pattern |
 | --- | --- |
-| Home | `NavigationStack` + inset grouped `List`: status hero, profile menu, detail rows, Exit toggle, Connect |
+| Home | Phone ↔ house diagram (flowing green link when connected), status, live ↓/↑ rates, Exit Node toggle, Connect/Disconnect |
 | Empty pairing | `ContentUnavailableView` with a bordered-prominent scan action |
-| Settings | System `Form` sheet (policy, trusted Wi‑Fi, paired host) |
+| Settings | System `Form`: routing, single Networks list with Home/Trusted/Normal roles (help behind ⓘ), paired host + Advanced |
 | Scanner | System sheet; camera preview only where needed; light/dark follows the device |
 
-Visual language for connection status uses system green / accent / orange /
-secondary rather than branded gradients.
+Connection diagram states: grey idle, accent connecting, green flowing connected
+(faster when Exit Node is on), orange unreachable, muted at home.
+Prefer outcome copy (“Home LAN only”, “All traffic via home”) over WireGuard
+jargon on primary surfaces.
 
 ## Storage and implementation
 
@@ -234,7 +242,7 @@ DNS, background roaming and hairpin transitions still require a device/network t
   Stored legacy records can be read,
   but must be re-paired against the current server to obtain a deletion credential.
 
-Enrollment is open to any trusted LAN user while the server process is running.
+Enrollment is open to any trusted LAN user while `--pair` is running (idle-stops after 2m with no success).
 The app checks the returned server key against the scanned version 1 QR. This is
 an identity consistency check, not authentication of the HTTP transport. See the
-server README for the `moorlan0` / SQLite persistence model.
+server README for the site conf / SQLite persistence model.

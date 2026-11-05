@@ -126,7 +126,7 @@ struct ScannerSheet: View {
             .frame(maxHeight: 420)
             .padding(.horizontal, 20)
 
-            Text("Scan on home Wi‑Fi. Allow Camera and Local Network when asked.")
+            Text("Scan on home Wi‑Fi.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

@@ -25,7 +25,7 @@ public struct TunnelPolicy: Equatable, Codable, Sendable {
     /// Home Wi‑Fi (`ssid:Name`) keeps the tunnel off. Trusted Wi‑Fi is split in automatic mode.
     public func decide(path: PathKind, homeSSIDs: Set<String> = []) -> Decision {
         if case .wifi(let id) = path, id.hasPrefix("ssid:"), homeSSIDs.contains(id) {
-            return .disconnect(reason: "On a home Wi‑Fi network")
+            return .disconnect(reason: "Tunnel stays off on home Wi‑Fi")
         }
         if mode == .exit { return .connect(fullTunnel: true) }
         if mode == .split { return .connect(fullTunnel: false) }
@@ -72,6 +72,19 @@ public struct TunnelProfile: Codable, Equatable, Sendable {
         lease = server.lease
         // The extension doesn't need the deletion capability.
         lease.unpairToken = nil
+        // Bake phone overrides into the profile copy; stored lease stays server-owned.
+        if let dns = server.client.dns {
+            lease.dns = dns
+        }
+        if let dnsSearch = server.client.dnsSearch {
+            lease.dnsSearch = dnsSearch
+        }
+        if let mtu = server.client.mtu {
+            lease.mtu = mtu
+        }
+        if let keepalive = server.client.persistentKeepalive {
+            lease.persistentKeepalive = keepalive
+        }
         lan = server.lan
         self.policy = policy
         homeSSIDs = server.homeSSIDs.sorted()

@@ -20,7 +20,7 @@ final class TunnelPolicyTests: XCTestCase {
         for mode in TunnelPolicy.Mode.allCases {
             XCTAssertEqual(
                 TunnelPolicy(mode: mode).decide(path: .wifi(id: "ssid:House"), homeSSIDs: home),
-                .disconnect(reason: "On a home Wi‑Fi network")
+                .disconnect(reason: "Tunnel stays off on home Wi‑Fi")
             )
         }
         XCTAssertEqual(
@@ -80,6 +80,49 @@ final class TunnelPolicyTests: XCTestCase {
         XCTAssertFalse(text.contains("private"))
         XCTAssertEqual(try JSONDecoder().decode(TunnelProfile.self, from: data), profile)
         XCTAssertEqual(profile.homeSSIDs, ["ssid:House"])
+    }
+
+    func testClientOverridesBakeIntoTunnelProfileWithoutChangingStoredLease() throws {
+        var server = PairedServer(
+            card: QRCard(pairURL: URL(string: "http://192.168.1.10/v1/pair")!, serverPublicKey: "server"),
+            lease: Lease(
+                address: "10.8.0.2/32",
+                prefixes: ["10.8.0.0/24"],
+                publicKey: "server",
+                endpoint: "example:51820",
+                mtu: 1420,
+                lan: "192.168.1.0/24",
+                dns: ["192.168.1.1"],
+                persistentKeepalive: 25
+            )
+        )
+        server.client = ClientTunnelSettings(dns: ["10.10.10.10"], dnsSearch: ["home.arpa"], mtu: 1380, persistentKeepalive: 30)
+        let profile = TunnelProfile(server: server, policy: TunnelPolicy())
+        XCTAssertEqual(profile.lease.dns, ["10.10.10.10"])
+        XCTAssertEqual(profile.lease.dnsSearch, ["home.arpa"])
+        XCTAssertEqual(profile.lease.mtu, 1380)
+        XCTAssertEqual(profile.lease.persistentKeepalive, 30)
+        XCTAssertEqual(server.lease.dns, ["192.168.1.1"])
+        XCTAssertEqual(server.lease.mtu, 1420)
+        XCTAssertEqual(server.lease.persistentKeepalive, 25)
+
+        let encoded = try JSONEncoder().encode(server)
+        let decoded = try JSONDecoder().decode(PairedServer.self, from: encoded)
+        XCTAssertEqual(decoded.client.dns, ["10.10.10.10"])
+        XCTAssertEqual(decoded.client.dnsSearch, ["home.arpa"])
+        XCTAssertEqual(decoded.lease.dns, ["192.168.1.1"])
+    }
+
+    func testClientDNSParsing() throws {
+        XCTAssertNil(try ClientTunnelSettings.parseDNS("").get())
+        XCTAssertEqual(try ClientTunnelSettings.parseDNS(" 10.10.10.10, 10.10.10.11 ").get(), ["10.10.10.10", "10.10.10.11"])
+        if case .failure = ClientTunnelSettings.parseDNS("not-an-ip") {} else {
+            XCTFail("expected invalid DNS failure")
+        }
+        XCTAssertEqual(try ClientTunnelSettings.parseDNSSearch(" home.arpa, LAN. ").get(), ["home.arpa", "lan"])
+        if case .failure = ClientTunnelSettings.parseDNSSearch("-bad") {} else {
+            XCTFail("expected invalid search domain failure")
+        }
     }
     func testIPv4ParsingAndNetworkBoundaries() {
         XCTAssertNil(IPv4Address("192.168.bad.1.2"))

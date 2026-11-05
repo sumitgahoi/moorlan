@@ -9,7 +9,7 @@ final class PairingClientTests: XCTestCase {
         PairedServer(
             card: QRCard(pairURL: URL(string: "http://192.168.1.10:8756/v1/pair")!, serverPublicKey: key),
             lease: Lease(address: "10.8.0.2/32", prefixes: ["10.8.0.0/24"], publicKey: key,
-                         endpoint: "vpn.example:51820", lan: "192.168.1.0/24", unpairToken: credential)
+                         endpoint: "vpn.example:51820", lan: "192.168.1.0/24", dns: ["192.168.1.1"], unpairToken: credential)
         )
     }
 
@@ -37,11 +37,12 @@ final class PairingClientTests: XCTestCase {
         """)
         XCTAssertEqual(card.v, 1)
         let lease = try JSONDecoder().decode(Lease.self, from: Data("""
-        {"address":"10.8.0.2/32","prefixes":["10.8.0.0/24"],"lan":"192.168.1.0/24","public_key":"\(key)","endpoint":"vpn.example:51820","persistent_keepalive":25,"unpair_token":"peer-secret"}
+        {"address":"10.8.0.2/32","prefixes":["10.8.0.0/24"],"lan":"192.168.1.0/24","dns":["192.168.1.1"],"public_key":"\(key)","endpoint":"vpn.example:51820","persistent_keepalive":25,"unpair_token":"peer-secret"}
         """.utf8))
         XCTAssertEqual(lease.unpairToken, "peer-secret")
         XCTAssertNil(lease.listenPort)
         XCTAssertEqual(lease.lan, "192.168.1.0/24")
+        XCTAssertEqual(lease.dns, ["192.168.1.1"])
     }
 
     func testPairingSendsDeviceKeyLabelAndChecksServerIdentity() async throws {
@@ -54,7 +55,7 @@ final class PairingClientTests: XCTestCase {
                 XCTAssertEqual(body, ["public_key": self.key, "label": "iPhone 17"])
                 let lease = Lease(address: "10.8.0.2/32", prefixes: ["10.8.0.0/24"],
                                   publicKey: responseKey, endpoint: "vpn.example:51820",
-                                  lan: "192.168.1.0/24", unpairToken: "peer-secret")
+                                  lan: "192.168.1.0/24", dns: ["192.168.1.1"], unpairToken: "peer-secret")
                 return (200, try JSONEncoder().encode(lease))
             }
             do {

@@ -51,7 +51,7 @@ sudo moorlan --add-interface wg0 \
   -private-endpoint 10.10.10.1:8756 \
   -home-cidrs 10.10.0.0/24,10.10.10.0/24 \
   -public-endpoint vpn.example.com:51820
-# optional: -dns 10.10.10.1  (AdGuard/router; omit → phone keeps 1.1.1.1 in exit mode)
+# optional: -dns 10.10.10.1 -dns-search home.arpa
 
 # Enroll phones (on home Wi‑Fi when scanning from the phone):
 sudo moorlan --pair
@@ -106,17 +106,20 @@ private-endpoint=10.10.10.1:8756
 home-cidrs=10.10.0.0/24,10.10.10.0/24
 public-endpoint=vpn.example.com:51820
 # dns=10.10.10.1
+# dns-search=home.arpa
 ```
 
 `dns` is optional. Set it explicitly (tunnel IP or an address inside `home-cidrs`)
 when phones should use your home resolver. If omitted, the lease has no DNS and
-the phone falls back to `1.1.1.1` / `1.0.0.1` in exit mode.
+the phone falls back to `1.1.1.1` / `1.0.0.1` in exit mode. Optional `dns-search`
+(e.g. `home.arpa`) requires `dns` and lets short names like `carbon` resolve the
+same way they do on the LAN.
 
 ### Commands
 
 | Command | Role |
 | --- | --- |
-| `--add-interface <iface>` | Greenfield: requires `-private-endpoint`, `-home-cidrs`, `-public-endpoint`; optional `-dns`; writes conf + DB + unit |
+| `--add-interface <iface>` | Greenfield: requires `-private-endpoint`, `-home-cidrs`, `-public-endpoint`; optional `-dns` / `-dns-search`; writes conf + DB + unit |
 | `--remove-interface <iface>` | Disable+delete unit, conf, and empty DB (refuses if peers remain) |
 | `--pair` / `--unpair` | Enrollment / unpair QR; idle-stop after 2m with no success |
 | `--list-peers` | Print enrolled peers: label, public key, address |

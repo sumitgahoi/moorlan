@@ -47,6 +47,7 @@ func run() error {
 	homeCIDRs := fs.String("home-cidrs", "", "override conf: home IPv4 CIDR(s)")
 	publicEndpoint := fs.String("public-endpoint", "", "override conf: public WireGuard host:port")
 	dns := fs.String("dns", "", "override conf: home DNS IPv4 address(es)")
+	dnsSearch := fs.String("dns-search", "", "override conf: DNS search domain(s)")
 	fs.Usage = printUsage
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		if err == flag.ErrHelp {
@@ -85,13 +86,13 @@ func run() error {
 	}
 
 	if *addIface != "" {
-		return runAddInterface(*addIface, *db, *privateEndpoint, *homeCIDRs, *publicEndpoint, *dns)
+		return runAddInterface(*addIface, *db, *privateEndpoint, *homeCIDRs, *publicEndpoint, *dns, *dnsSearch)
 	}
 	if *removeIface != "" {
 		return runRemoveInterface(*removeIface)
 	}
 
-	site, err := resolveSite(*wg, *db, *privateEndpoint, *homeCIDRs, *publicEndpoint, *dns, explicit)
+	site, err := resolveSite(*wg, *db, *privateEndpoint, *homeCIDRs, *publicEndpoint, *dns, *dnsSearch, explicit)
 	if err != nil {
 		return err
 	}
@@ -153,7 +154,7 @@ func run() error {
 	if *unpair {
 		host, err = runtime.DiscoverUnpair(site.WG, site.DB, site.PrivateEndpoint)
 	} else {
-		host, err = runtime.Discover(site.WG, site.DB, site.PrivateEndpoint, site.HomeCIDRs, site.PublicEndpoint, site.DNS)
+		host, err = runtime.Discover(site.WG, site.DB, site.PrivateEndpoint, site.HomeCIDRs, site.PublicEndpoint, site.DNS, site.DNSSearch)
 	}
 	if err != nil {
 		return err
@@ -199,6 +200,9 @@ func run() error {
 	fmt.Printf("interface  %s\ndatabase   %s\nprivate    %s\nhome CIDRs %s\n", host.Snap.Name, host.StorePath, addr, host.HomeCIDRLease())
 	if len(host.DNS) > 0 {
 		fmt.Printf("dns        %s\n", strings.Join(host.DNS, ","))
+	}
+	if len(host.DNSSearch) > 0 {
+		fmt.Printf("dns-search %s\n", strings.Join(host.DNSSearch, ","))
 	}
 	fmt.Printf("service    %s\n", controlURL)
 	if err := qr.WriteANSI(os.Stdout, text); err != nil {
@@ -252,6 +256,7 @@ Peers live in SQLite. Default -wg is wg0 when only one name is needed.
   -home-cidrs          home IPv4 CIDR(s) (required for --add-interface / --pair)
   -public-endpoint     public WireGuard DDNS or static host:port (required for --add-interface / --pair)
   -dns                 optional DNS IPv4 address(es): tunnel IP or inside home-cidrs
+  -dns-search          optional DNS search domain(s), e.g. home.arpa (requires -dns)
 `)
 }
 
@@ -276,7 +281,7 @@ func printPeers(ctx context.Context, assigner *runtime.Assigner) error {
 	return w.Flush()
 }
 
-func resolveSite(wg, db, privateEndpoint, homeCIDRs, publicEndpoint, dns string, explicit map[string]bool) (settings.Site, error) {
+func resolveSite(wg, db, privateEndpoint, homeCIDRs, publicEndpoint, dns, dnsSearch string, explicit map[string]bool) (settings.Site, error) {
 	iface := "wg0"
 	if explicit["wg"] {
 		iface = wg
@@ -305,6 +310,7 @@ func resolveSite(wg, db, privateEndpoint, homeCIDRs, publicEndpoint, dns string,
 		HomeCIDRs:       homeCIDRs,
 		PublicEndpoint:  publicEndpoint,
 		DNS:             dns,
+		DNSSearch:       dnsSearch,
 	}
 	site := settings.Apply(conf, flags, explicit)
 	if !explicit["wg"] {
@@ -332,7 +338,7 @@ func requirePairSettings(site *settings.Site, unpairOnly bool) error {
 	return nil
 }
 
-func runAddInterface(iface, db, privateEndpoint, homeCIDRs, publicEndpoint, dns string) error {
+func runAddInterface(iface, db, privateEndpoint, homeCIDRs, publicEndpoint, dns, dnsSearch string) error {
 	if err := runtime.ValidateInterfaceName(iface); err != nil {
 		return err
 	}
@@ -365,7 +371,7 @@ func runAddInterface(iface, db, privateEndpoint, homeCIDRs, publicEndpoint, dns 
 		return err
 	}
 
-	site := settings.Site{WG: iface, DB: storePath, PrivateEndpoint: privateEndpoint, HomeCIDRs: homeCIDRs, PublicEndpoint: publicEndpoint, DNS: dns}
+	site := settings.Site{WG: iface, DB: storePath, PrivateEndpoint: privateEndpoint, HomeCIDRs: homeCIDRs, PublicEndpoint: publicEndpoint, DNS: dns, DNSSearch: dnsSearch}
 	if site.PrivateEndpoint == "" || site.HomeCIDRs == "" || site.PublicEndpoint == "" {
 		release()
 		return fmt.Errorf(`--add-interface requires flags (values are written to %s), for example:
@@ -373,14 +379,14 @@ func runAddInterface(iface, db, privateEndpoint, homeCIDRs, publicEndpoint, dns 
     -private-endpoint 10.10.10.1:8756 \
     -home-cidrs 10.10.0.0/24,10.10.10.0/24 \
     -public-endpoint vpn.example.com:51820
-  # optional: -dns 10.10.10.1`, settings.Path(iface), iface)
+  # optional: -dns 10.10.10.1 -dns-search home.arpa`, settings.Path(iface), iface)
 	}
 	if _, _, err := payload.SplitEndpoint(site.PublicEndpoint); err != nil {
 		release()
 		return fmt.Errorf("public-endpoint: %w", err)
 	}
 
-	host, err := runtime.Discover(iface, storePath, site.PrivateEndpoint, site.HomeCIDRs, site.PublicEndpoint, site.DNS)
+	host, err := runtime.Discover(iface, storePath, site.PrivateEndpoint, site.HomeCIDRs, site.PublicEndpoint, site.DNS, site.DNSSearch)
 	if err != nil {
 		release()
 		return fmt.Errorf("cannot add interface: %w", err)
@@ -401,6 +407,9 @@ func runAddInterface(iface, db, privateEndpoint, homeCIDRs, publicEndpoint, dns 
 		site.PrivateEndpoint, site.HomeCIDRs, site.PublicEndpoint)
 	if site.DNS != "" {
 		fmt.Printf("  dns=%s\n", site.DNS)
+	}
+	if site.DNSSearch != "" {
+		fmt.Printf("  dns-search=%s\n", site.DNSSearch)
 	}
 
 	ctx := context.Background()

@@ -8,62 +8,75 @@ struct HomeView: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                Section {
-                    statusHero
-                        .listRowBackground(Color.clear)
-                        .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
-                }
+            VStack(spacing: 0) {
+                Spacer(minLength: 12)
 
-                Section {
-                    profilePicker
-                }
+                ConnectionDiagramView(state: diagramState)
+                    .padding(.bottom, 28)
 
-                Section {
-                    LabeledContent("Tunnel IP", value: tunnel.selectedServer?.lease.address ?? "—")
-                    LabeledContent("Endpoint", value: tunnel.selectedServer?.lease.endpoint ?? "—")
-                    LabeledContent("Mode", value: modeLabel)
-                }
+                VStack(spacing: 6) {
+                    Text(statusTitle)
+                        .font(.largeTitle.weight(.bold))
+                        .multilineTextAlignment(.center)
 
-                Section {
+                    profileLabel
+
+                    Text(statusSubtitle)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if tunnel.status == .connected, let rates = tunnel.transferRates {
+                        Text(rates)
+                            .font(.subheadline.monospacedDigit().weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .padding(.top, 4)
+                            .accessibilityLabel(tunnel.transferRatesAccessibility)
+                    }
+                }
+                .padding(.horizontal, 28)
+
+                if showsExitToggle {
                     Toggle(isOn: exitBinding) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Exit node")
-                            Text("Automatic: exit on other Wi‑Fi; subnet access on trusted Wi‑Fi and cellular.")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
+                        Text("Exit Node")
+                            .font(.body.weight(.medium))
                     }
-                    .disabled(tunnel.onHomeWiFi)
-
-                    if tunnel.policy.mode != .automatic {
-                        Button("Use automatic network policy") {
-                            tunnel.policy.mode = .automatic
-                            tunnel.savePolicy()
-                        }
-                    }
-                } footer: {
-                    Text(pathCaption)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .padding(.horizontal, 28)
+                    .padding(.top, 28)
+                    .disabled(tunnel.isUnpairing)
+                    .accessibilityHint("When on, all traffic goes through home. When off, only your home network is reachable.")
                 }
 
-                Section {
-                    Button {
-                        Task { await tunnel.toggleDesiredConnection() }
-                    } label: {
-                        Text(buttonTitle)
-                            .font(.body.weight(.semibold))
-                            .frame(maxWidth: .infinity)
-                    }
-                    .disabled(
-                        tunnel.status == .connecting
-                            || tunnel.status == .disconnecting
-                            || tunnel.onHomeWiFi
-                            || tunnel.isUnpairing
-                    )
+                Spacer(minLength: 24)
+
+                Button {
+                    Task { await tunnel.toggleDesiredConnection() }
+                } label: {
+                    Text(buttonTitle)
+                        .font(.body.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 4)
                 }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .tint(buttonIsDisconnect ? Color.red.opacity(0.85) : nil)
+                .disabled(
+                    tunnel.status == .connecting
+                        || tunnel.status == .disconnecting
+                        || tunnel.onHomeWiFi
+                        || tunnel.isUnpairing
+                )
+                .padding(.horizontal, 28)
+                .padding(.bottom, 28)
             }
-            .listStyle(.insetGrouped)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(.systemGroupedBackground))
             .navigationTitle("Moorlan")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(action: onSettings) {
@@ -83,54 +96,39 @@ struct HomeView: View {
         }
     }
 
-    private var statusHero: some View {
-        HStack(alignment: .center, spacing: 14) {
-            Image(systemName: statusSymbol)
-                .font(.system(size: 28, weight: .semibold))
-                .foregroundStyle(statusTint)
-                .symbolRenderingMode(.hierarchical)
-                .symbolEffect(.pulse, options: .repeating, isActive: tunnel.status == .connecting)
-                .frame(width: 44, height: 44)
-                .accessibilityHidden(true)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(statusTitle)
-                    .font(.largeTitle.weight(.bold))
-                Text(tunnel.statusReason ?? pathCaption)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.vertical, 8)
-        .accessibilityElement(children: .combine)
-    }
-
-    private var profilePicker: some View {
-        Menu {
-            ForEach(tunnel.servers) { server in
-                Button(server.displayName) {
-                    Task {
-                        await tunnel.selectProfile(server.id)
-                        await tunnel.applyDesiredState()
+    @ViewBuilder
+    private var profileLabel: some View {
+        if tunnel.servers.count > 1 {
+            Menu {
+                ForEach(tunnel.servers) { server in
+                    Button(server.displayName) {
+                        Task {
+                            await tunnel.selectProfile(server.id)
+                            await tunnel.applyDesiredState()
+                        }
                     }
                 }
-            }
-        } label: {
-            LabeledContent("Profile") {
+            } label: {
                 HStack(spacing: 4) {
                     Text(tunnel.selectedServer?.displayName ?? "Choose profile")
-                        .foregroundStyle(.secondary)
+                        .font(.body.weight(.medium))
                     Image(systemName: "chevron.up.chevron.down")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.tertiary)
                 }
             }
+            .disabled(tunnel.isUnpairing)
+            .accessibilityLabel("Profile")
+            .accessibilityValue(tunnel.selectedServer?.displayName ?? "None")
+        } else if let name = tunnel.selectedServer?.displayName {
+            Text(name)
+                .font(.body.weight(.medium))
+                .foregroundStyle(.secondary)
         }
-        .disabled(tunnel.isUnpairing)
-        .accessibilityLabel("Profile")
-        .accessibilityValue(tunnel.selectedServer?.displayName ?? "None")
+    }
+
+    private var showsExitToggle: Bool {
+        !tunnel.onHomeWiFi && (tunnel.status == .connected || tunnel.status == .connecting)
     }
 
     private var exitBinding: Binding<Bool> {
@@ -140,31 +138,45 @@ struct HomeView: View {
         )
     }
 
+    private var diagramState: ConnectionDiagramView.LinkState {
+        if tunnel.onHomeWiFi { return .atHome }
+        switch tunnel.status {
+        case .invalid: return .unreachable
+        case .connecting, .disconnecting: return .connecting
+        case .connected:
+            return tunnel.effectiveExit ? .connectedExit : .connectedSplit
+        case .disconnected:
+            return .idle
+        }
+    }
+
     private var statusTitle: String {
+        if tunnel.onHomeWiFi { return "Off · Home" }
         switch tunnel.status {
         case .connected: return "Connected"
         case .connecting: return "Connecting"
         case .disconnecting: return "Disconnecting"
-        case .invalid: return "Needs Permission"
+        case .invalid: return "Needs Attention"
         case .disconnected: return "Disconnected"
         }
     }
 
-    private var statusSymbol: String {
+    private var statusSubtitle: String {
+        if tunnel.onHomeWiFi { return "Tunnel stays off here" }
         switch tunnel.status {
-        case .connected: return "lock.fill"
-        case .connecting, .disconnecting: return "arrow.triangle.2.circlepath"
-        case .invalid: return "exclamationmark.triangle.fill"
-        case .disconnected: return "lock.open"
-        }
-    }
-
-    private var statusTint: Color {
-        switch tunnel.status {
-        case .connected: return .green
-        case .connecting: return .accentColor
-        case .invalid: return .orange
-        default: return .secondary
+        case .connected:
+            return tunnel.effectiveExit ? "All traffic via home" : "Home LAN only"
+        case .connecting:
+            return "Reaching your home…"
+        case .disconnecting:
+            return "Closing the tunnel…"
+        case .invalid:
+            return tunnel.statusReason ?? "Check VPN permission in Settings"
+        case .disconnected:
+            if tunnel.statusReason == "Waiting for a network" {
+                return "Waiting for a network"
+            }
+            return "Tap Connect when you’re away from home"
         }
     }
 
@@ -175,23 +187,7 @@ struct HomeView: View {
         }
     }
 
-    private var modeLabel: String {
-        let home = tunnel.selectedServer?.homeSSIDs ?? []
-        if case .disconnect = tunnel.policy.decide(path: tunnel.pathKind, homeSSIDs: home) {
-            return "Paused on home Wi‑Fi"
-        }
-        if case .connect(let full) = tunnel.policy.decide(path: tunnel.pathKind, homeSSIDs: home) {
-            return full ? "Full tunnel" : "Split tunnel"
-        }
-        return "—"
-    }
-
-    private var pathCaption: String {
-        if tunnel.onHomeWiFi { return "Home Wi‑Fi · tunnel off" }
-        switch tunnel.pathKind {
-        case .cellular: return "Cellular · trusted by default"
-        case .wifi(let id): return tunnel.policy.trustedNetworkIDs.contains(id) ? "Trusted Wi‑Fi" : "Untrusted Wi‑Fi"
-        case .other: return "Current network"
-        }
+    private var buttonIsDisconnect: Bool {
+        tunnel.status == .connected || tunnel.status == .connecting
     }
 }

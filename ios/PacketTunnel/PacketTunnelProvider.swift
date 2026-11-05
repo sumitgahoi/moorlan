@@ -26,9 +26,26 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         }
     }
     override func handleAppMessage(_ data: Data, completionHandler: ((Data?) -> Void)?) {
+        // WireGuard convention: a single 0 byte requests the UAPI runtime config (transfer counters).
+        if data.count == 1, data[0] == 0 {
+            Task { @MainActor in
+                guard let controller else {
+                    completionHandler?(nil)
+                    return
+                }
+                controller.runtimeConfiguration { settings in
+                    completionHandler?(settings.flatMap { $0.data(using: .utf8) })
+                }
+            }
+            return
+        }
         Task { @MainActor in
-            do { try await controller?.reload(); completionHandler?(Data("ok".utf8)) }
-            catch { completionHandler?(nil) }
+            do {
+                try await controller?.reload()
+                completionHandler?(Data("ok".utf8))
+            } catch {
+                completionHandler?(nil)
+            }
         }
     }
 }
@@ -70,7 +87,7 @@ private final class TunnelController {
         let homeSSIDs = Set(profile.homeSSIDs)
         guard case .connect(let full) = profile.policy.decide(path: monitor.snapshot.kind, homeSSIDs: homeSSIDs) else {
             monitor.stop()
-            throw MoorlanError.tunnelFailed("On a home Wi‑Fi network")
+            throw MoorlanError.tunnelFailed("Tunnel stays off on home Wi‑Fi")
         }
         guard !stopping else { throw CancellationError() }
         let config = try configuration(full: full)
@@ -96,6 +113,10 @@ private final class TunnelController {
         profile = try readProfile()
         lastFullTunnel = nil
         await applyPolicy()
+    }
+
+    func runtimeConfiguration(_ completionHandler: @escaping (String?) -> Void) {
+        adapter.getRuntimeConfiguration(completionHandler: completionHandler)
     }
     private func applyPolicy() async {
         guard running, !stopping else { return }

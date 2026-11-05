@@ -12,6 +12,7 @@
 		0D6E17339DC919FA9655CD1F /* ScannerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 927E98A1CB2BAD5029341EA4 /* ScannerSheet.swift */; };
 		11909FA21FDC257F18198468 /* WiFiIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB4FA0606C1213E683370B7A /* WiFiIdentity.swift */; };
 		1AD0C874B53B9517D4F285B0 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = DFAEA05CC56709EDEBE419B0 /* Assets.xcassets */; };
+		2812BDE7F8784B7312C42CD9 /* ConnectionDiagramView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16435B4161A033C8F1BDB2C9 /* ConnectionDiagramView.swift */; };
 		2BF667F87D2D50507B1DB21D /* MoorlanCore in Frameworks */ = {isa = PBXBuildFile; productRef = 7AA63E122F8FC16D75D37858 /* MoorlanCore */; };
 		3C5FF91BC2AC73B99649503F /* WireGuardProfileBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D44DABE92EC65365EB9EBA2 /* WireGuardProfileBuilder.swift */; };
 		464523A4552483DCADE253A5 /* EmptyPairingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56856E25F169EAC01DFBE7E1 /* EmptyPairingView.swift */; };
@@ -62,6 +63,7 @@
 
 /* Begin PBXFileReference section */
 		059A0BCEE175CFDB16E228D2 /* MoorlanApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoorlanApp.swift; sourceTree = "<group>"; };
+		16435B4161A033C8F1BDB2C9 /* ConnectionDiagramView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionDiagramView.swift; sourceTree = "<group>"; };
 		16C3CEA93B96777FD8406F78 /* wireguard-apple */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "wireguard-apple"; path = "Vendor/wireguard-apple"; sourceTree = SOURCE_ROOT; };
 		2FF5CA8C286912565D4D2B5A /* PacketTunnelProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PacketTunnelProvider.swift; sourceTree = "<group>"; };
 		435081AE7AF90DFAFB0F30CD /* PacketTunnel.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PacketTunnel.entitlements; sourceTree = "<group>"; };
@@ -119,6 +121,7 @@
 			isa = PBXGroup;
 			children = (
 				DFAEA05CC56709EDEBE419B0 /* Assets.xcassets */,
+				16435B4161A033C8F1BDB2C9 /* ConnectionDiagramView.swift */,
 				56856E25F169EAC01DFBE7E1 /* EmptyPairingView.swift */,
 				DDD9E60C864FCFC32AD9FE47 /* HomeView.swift */,
 				CAE55EF2ED41A8CAB35AE3B4 /* Info.plist */,
@@ -303,6 +306,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				CBC7B93110C12B4BD006D8B6 /* AppIdentity.swift in Sources */,
+				2812BDE7F8784B7312C42CD9 /* ConnectionDiagramView.swift in Sources */,
 				464523A4552483DCADE253A5 /* EmptyPairingView.swift in Sources */,
 				8CA4E20467690C4773C0BF54 /* HomeView.swift in Sources */,
 				8B2DE4BE275F71079CA00DFF /* LocalNetworkAuthorization.swift in Sources */,

@@ -20,13 +20,14 @@ type Host struct {
 	PairIP    string
 	HomeCIDRs []string
 	DNS       []string
+	DNSSearch []string
 	PairHost  string
 	PairPort  int
 	Endpoint  string
 }
 
 // Discover opens an existing moorlanN device for pairing (needs pool + listen port).
-func Discover(wgName, storePath, privateEndpoint, homeCIDRs, publicEndpoint, dns string) (Host, error) {
+func Discover(wgName, storePath, privateEndpoint, homeCIDRs, publicEndpoint, dns, dnsSearch string) (Host, error) {
 	host, err := discover(wgName, storePath, privateEndpoint, homeCIDRs, publicEndpoint, true)
 	if err != nil {
 		return Host{}, err
@@ -39,7 +40,15 @@ func Discover(wgName, storePath, privateEndpoint, homeCIDRs, publicEndpoint, dns
 	if err != nil {
 		return Host{}, err
 	}
+	search, err := parseDNSSearch(dnsSearch)
+	if err != nil {
+		return Host{}, err
+	}
+	if len(search) > 0 && len(servers) == 0 {
+		return Host{}, fmt.Errorf("dns-search requires dns (point phones at the resolver that serves those domains)")
+	}
 	host.DNS = servers
+	host.DNSSearch = search
 	return host, nil
 }
 
@@ -363,6 +372,59 @@ func parseDNSServers(text string, homeCIDRs []string, tunnelOwn net.IP) ([]strin
 		out = append(out, addr)
 	}
 	return out, nil
+}
+
+// parseDNSSearch parses optional search domains (e.g. home.arpa) so short names
+// like "carbon" expand the same way they do on the LAN.
+func parseDNSSearch(text string) ([]string, error) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil, nil
+	}
+	var out []string
+	seen := map[string]bool{}
+	for _, part := range strings.Split(text, ",") {
+		part = strings.ToLower(strings.TrimSpace(part))
+		part = strings.TrimSuffix(part, ".")
+		if part == "" {
+			continue
+		}
+		if err := validateDNSSearchDomain(part); err != nil {
+			return nil, err
+		}
+		if seen[part] {
+			continue
+		}
+		seen[part] = true
+		out = append(out, part)
+	}
+	return out, nil
+}
+
+func validateDNSSearchDomain(domain string) error {
+	if len(domain) > 253 {
+		return fmt.Errorf("unsupported -dns-search %q: too long", domain)
+	}
+	labels := strings.Split(domain, ".")
+	if len(labels) < 1 {
+		return fmt.Errorf("unsupported -dns-search %q", domain)
+	}
+	for _, label := range labels {
+		if label == "" || len(label) > 63 {
+			return fmt.Errorf("unsupported -dns-search %q: empty or oversized label", domain)
+		}
+		if label[0] == '-' || label[len(label)-1] == '-' {
+			return fmt.Errorf("unsupported -dns-search %q: label cannot start or end with '-'", domain)
+		}
+		for i := 0; i < len(label); i++ {
+			c := label[i]
+			if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' {
+				continue
+			}
+			return fmt.Errorf("unsupported -dns-search %q: invalid character", domain)
+		}
+	}
+	return nil
 }
 
 func devicePeers(device *wgtypes.Device) []iface.Peer {

@@ -94,6 +94,19 @@ func TestParseDNSServers(t *testing.T) {
 	}
 }
 
+func TestParseDNSSearch(t *testing.T) {
+	got, err := parseDNSSearch("home.arpa, LAN.")
+	if err != nil || len(got) != 2 || got[0] != "home.arpa" || got[1] != "lan" {
+		t.Fatalf("%v %v", got, err)
+	}
+	if _, err := parseDNSSearch(""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := parseDNSSearch("-bad.arpa"); err == nil {
+		t.Fatal("invalid search domain accepted")
+	}
+}
+
 func TestHostLeaseHelpers(t *testing.T) {
 	h := Host{HomeCIDRs: []string{"10.10.10.0/24", "10.10.20.0/24"}}
 	if got := h.HomeCIDRLease(); got != "10.10.10.0/24,10.10.20.0/24" {

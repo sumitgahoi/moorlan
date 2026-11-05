@@ -7,6 +7,8 @@ import Combine
 @MainActor
 final class TunnelManager: ObservableObject {
     enum Status: Equatable { case disconnected, connecting, connected, disconnecting, invalid }
+    enum NetworkRole: String, CaseIterable { case home, trusted, normal }
+
     @Published private(set) var status: Status = .disconnected
     @Published private(set) var statusReason: String?
     @Published var policy: TunnelPolicy
@@ -14,6 +16,9 @@ final class TunnelManager: ObservableObject {
     @Published private(set) var selectedServerID: String?
     @Published var lastError: String?
     @Published private(set) var isUnpairing = false
+    /// Formatted live rates while connected, e.g. "↓ 1.2 MB/s  ↑ 84 KB/s".
+    @Published private(set) var transferRates: String?
+    @Published private(set) var transferRatesAccessibility = ""
 
     private let store = ServerStore()
     private let identityStore = IdentityStore(accessGroup: AppIdentity.keychainAccessGroup)
@@ -25,6 +30,10 @@ final class TunnelManager: ObservableObject {
     private var applying = false
     private var needsApply = false
     private var userWantsTunnel = true
+    private var statsTask: Task<Void, Never>?
+    private var lastRxBytes: UInt64?
+    private var lastTxBytes: UInt64?
+    private var lastStatsAt: Date?
 
     var selectedServer: PairedServer? { servers.first { $0.id == selectedServerID } ?? servers.first }
     var pathKind: TunnelPolicy.PathKind { pathMonitor.snapshot.kind }
@@ -57,47 +66,94 @@ final class TunnelManager: ObservableObject {
         lastProfile = nil
         Task { await applyDesiredState() }
     }
+
+    /// Updates phone-owned tunnel knobs for the selected host and refreshes the VPN profile.
+    func saveClientSettings(_ client: ClientTunnelSettings) {
+        guard var server = selectedServer else { return }
+        server.client = client
+        upsertServer(server)
+        lastProfile = nil
+        Task { await applyDesiredState() }
+    }
+
     func setExit(_ enabled: Bool) { policy.mode = enabled ? .exit : .split; savePolicy() }
     func identifyWiFi() { WiFiIdentity.requestAccess(into: pathMonitor) }
-    func trustCurrentNetwork() {
-        guard let id = currentNetworkID else { identifyWiFi(); return }
-        policy.trustedNetworkIDs.insert(id)
-        policy.mode = .automatic
+
+    func networkRole(for id: String) -> NetworkRole {
+        if selectedServer?.homeSSIDs.contains(id) == true { return .home }
+        if policy.trustedNetworkIDs.contains(id) { return .trusted }
+        return .normal
+    }
+
+    /// Home = tunnel off; Trusted = connected with Exit Node off in Automatic; Normal = neither.
+    func setNetworkRole(_ role: NetworkRole, for id: String) {
+        guard var server = selectedServer else { return }
+        switch role {
+        case .home:
+            server.homeSSIDs.insert(id)
+            policy.trustedNetworkIDs.remove(id)
+        case .trusted:
+            server.homeSSIDs.remove(id)
+            policy.trustedNetworkIDs.insert(id)
+            if policy.mode != .automatic { policy.mode = .automatic }
+        case .normal:
+            server.homeSSIDs.remove(id)
+            policy.trustedNetworkIDs.remove(id)
+        }
+        upsertServer(server)
         savePolicy()
     }
-    func untrustCurrentNetwork() {
-        if let id = currentNetworkID { policy.trustedNetworkIDs.remove(id); savePolicy() }
+
+    /// Known SSIDs: current network plus saved home/trusted entries.
+    var knownNetworkIDs: [String] {
+        var ids = Set(selectedServer?.homeSSIDs ?? [])
+        ids.formUnion(policy.trustedNetworkIDs)
+        if let current = currentNetworkID { ids.insert(current) }
+        return ids.sorted {
+            displayNetworkName($0).localizedCaseInsensitiveCompare(displayNetworkName($1)) == .orderedAscending
+        }
     }
 
-    func addCurrentHomeNetwork() {
-        guard let id = currentNetworkID else { identifyWiFi(); return }
-        guard var server = selectedServer else { return }
-        guard server.homeSSIDs.insert(id).inserted else { return }
-        upsertServer(server)
-        lastProfile = nil
-        Task { await applyDesiredState() }
+    func displayNetworkName(_ id: String) -> String {
+        TunnelPolicy.ssidName(from: id) ?? id
     }
 
-    func removeHomeNetwork(_ id: String) {
-        guard var server = selectedServer else { return }
-        guard server.homeSSIDs.remove(id) != nil else { return }
-        upsertServer(server)
-        lastProfile = nil
-        Task { await applyDesiredState() }
+    /// Admin-visible peer name sent at pair time (`moorlan --list-peers`).
+    /// iOS 16+ returns a generic model from `UIDevice.current.name` unless Apple
+    /// grants a restricted entitlement, so the user can set this explicitly.
+    var deviceLabel: String {
+        get {
+            let stored = UserDefaults.standard.string(forKey: Self.deviceLabelKey)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !stored.isEmpty { return stored }
+            let system = UIDevice.current.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            return system.isEmpty ? "iPhone" : system
+        }
+        set {
+            let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty {
+                UserDefaults.standard.removeObject(forKey: Self.deviceLabelKey)
+            } else {
+                UserDefaults.standard.set(trimmed, forKey: Self.deviceLabelKey)
+            }
+            objectWillChange.send()
+        }
     }
+
+    private static let deviceLabelKey = "device-label"
 
     func pair(card: QRCard) async throws {
         try await LocalNetworkAuthorization.shared.ensureAccess(to: card.pairURL)
         let identity = try identityStore.loadOrCreate()
-        let name = UIDevice.current.name.trimmingCharacters(in: .whitespacesAndNewlines)
         let lease = try await PairingClient().pair(
             card: card,
             publicKey: identity.publicKey,
-            label: name.isEmpty ? "iPhone" : name
+            label: deviceLabel
         )
         var server = PairedServer(card: card, lease: lease)
         if let existing = servers.first(where: { $0.publicKey == server.publicKey }) {
             server.homeSSIDs = existing.homeSSIDs
+            server.client = existing.client
         }
         if let id = currentNetworkID {
             server.homeSSIDs.insert(id)
@@ -201,10 +257,16 @@ final class TunnelManager: ObservableObject {
                 lastProfile = profile
             }
             switch decision {
-            case .disconnect(let reason): statusReason = reason; await disconnect()
-            case .connect(let full):
-                statusReason = full ? "Exit node · all traffic" : "Subnet access · split tunnel"
-                guard userWantsTunnel, let manager else { return }
+            case .disconnect(let reason):
+                statusReason = reason
+                await disconnect()
+            case .connect:
+                // Routing copy is derived in the UI from effectiveExit while connected.
+                statusReason = nil
+                guard userWantsTunnel, let manager else {
+                    refreshStatus()
+                    return
+                }
                 if manager.connection.status == .connected {
                     if changed, let session = manager.connection as? NETunnelProviderSession {
                         try session.sendProviderMessage(Data("reload-policy".utf8)) { _ in }
@@ -276,7 +338,11 @@ final class TunnelManager: ObservableObject {
         store.upsert(server)
         servers = store.loadServers()
     }
-    func disconnect() async { manager?.connection.stopVPNTunnel(); refreshStatus() }
+    func disconnect() async {
+        manager?.connection.stopVPNTunnel()
+        refreshStatus()
+    }
+
     private func observeVPN() {
         observers.append(NotificationCenter.default.addObserver(forName: .NEVPNStatusDidChange, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.refreshStatus() }
@@ -298,6 +364,76 @@ final class TunnelManager: ObservableObject {
         case .invalid: status = .invalid
         default: status = .disconnected
         }
+        updateStatsPolling()
+    }
+
+    private func updateStatsPolling() {
+        if status == .connected {
+            guard statsTask == nil else { return }
+            statsTask = Task { [weak self] in
+                while !Task.isCancelled {
+                    await self?.refreshTransferRates()
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                }
+            }
+        } else {
+            statsTask?.cancel()
+            statsTask = nil
+            transferRates = nil
+            transferRatesAccessibility = ""
+            lastRxBytes = nil
+            lastTxBytes = nil
+            lastStatsAt = nil
+        }
+    }
+
+    private func refreshTransferRates() async {
+        guard status == .connected,
+              let session = manager?.connection as? NETunnelProviderSession else { return }
+        let uapi: String? = await withCheckedContinuation { cont in
+            do {
+                try session.sendProviderMessage(Data([0])) { data in
+                    cont.resume(returning: data.flatMap { String(data: $0, encoding: .utf8) })
+                }
+            } catch {
+                cont.resume(returning: nil)
+            }
+        }
+        guard let uapi else { return }
+        let (rx, tx) = Self.parseTransferBytes(uapi)
+        let now = Date()
+        defer {
+            lastRxBytes = rx
+            lastTxBytes = tx
+            lastStatsAt = now
+        }
+        guard let previousRx = lastRxBytes, let previousTx = lastTxBytes, let previousAt = lastStatsAt else { return }
+        let dt = now.timeIntervalSince(previousAt)
+        guard dt > 0.2 else { return }
+        let down = Double(rx &- previousRx) / dt
+        let up = Double(tx &- previousTx) / dt
+        transferRates = "↓ \(Self.formatRate(down))  ↑ \(Self.formatRate(up))"
+        transferRatesAccessibility = "Download \(Self.formatRate(down)), upload \(Self.formatRate(up))"
+    }
+
+    private static func parseTransferBytes(_ uapi: String) -> (UInt64, UInt64) {
+        var rx: UInt64 = 0
+        var tx: UInt64 = 0
+        for line in uapi.split(whereSeparator: \.isNewline) {
+            if line.hasPrefix("rx_bytes="), let value = UInt64(line.dropFirst("rx_bytes=".count)) {
+                rx += value
+            } else if line.hasPrefix("tx_bytes="), let value = UInt64(line.dropFirst("tx_bytes=".count)) {
+                tx += value
+            }
+        }
+        return (rx, tx)
+    }
+
+    private static func formatRate(_ bytesPerSecond: Double) -> String {
+        let abs = max(0, bytesPerSecond)
+        if abs < 1000 { return String(format: "%.0f B/s", abs) }
+        if abs < 1000 * 1000 { return String(format: "%.1f KB/s", abs / 1000) }
+        return String(format: "%.2f MB/s", abs / 1_000_000)
     }
 }
 

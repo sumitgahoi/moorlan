@@ -14,7 +14,17 @@ enum WireGuardProfileBuilder {
         var interface = InterfaceConfiguration(privateKey: key)
         interface.addresses = [address]
         if let mtu = profile.lease.mtu { interface.mtu = UInt16(exactly: mtu) }
-        if fullTunnel { interface.dns = ["1.1.1.1", "1.0.0.1"].compactMap { DNSServer(from: $0) } }
+        let dnsServers = (profile.lease.dns ?? []).compactMap { DNSServer(from: $0) }
+        if !dnsServers.isEmpty {
+            interface.dns = dnsServers
+        } else if fullTunnel {
+            // Pre-dns leases: keep exit-mode Internet working until the phone re-pairs.
+            interface.dns = ["1.1.1.1", "1.0.0.1"].compactMap { DNSServer(from: $0) }
+        }
+        let search = (profile.lease.dnsSearch ?? []).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        if !search.isEmpty {
+            interface.dnsSearch = search
+        }
         var peer = PeerConfiguration(publicKey: publicKey)
         peer.endpoint = endpoint
         peer.persistentKeepAlive = UInt16(exactly: profile.lease.persistentKeepalive ?? 25)

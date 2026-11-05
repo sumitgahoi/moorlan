@@ -22,6 +22,7 @@ type Site struct {
 	HomeCIDRs       string
 	PublicEndpoint  string
 	DNS             string
+	DNSSearch       string
 }
 
 // Path returns /etc/moorlan/<iface>.conf.
@@ -99,10 +100,12 @@ func Load(iface string) (Site, error) {
 			site.PublicEndpoint = value
 		case "dns":
 			site.DNS = value
+		case "dns-search":
+			site.DNSSearch = value
 		case "unit":
 			// Obsolete: rehydrate units no longer depend on networkd vs wg-quick.
 		default:
-			return Site{}, fmt.Errorf("%s:%d: unknown key %q (allowed: wg, db, private-endpoint, home-cidrs, public-endpoint, dns)", path, lineNo, key)
+			return Site{}, fmt.Errorf("%s:%d: unknown key %q (allowed: wg, db, private-endpoint, home-cidrs, public-endpoint, dns, dns-search)", path, lineNo, key)
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -143,6 +146,9 @@ func Save(site Site) error {
 	if site.DNS != "" {
 		fmt.Fprintf(&b, "dns=%s\n", site.DNS)
 	}
+	if site.DNSSearch != "" {
+		fmt.Fprintf(&b, "dns-search=%s\n", site.DNSSearch)
+	}
 	path := Path(site.WG)
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, []byte(b.String()), 0o600); err != nil {
@@ -174,6 +180,9 @@ func Apply(conf, flags Site, explicit map[string]bool) Site {
 	}
 	if explicit["dns"] {
 		out.DNS = flags.DNS
+	}
+	if explicit["dns-search"] {
+		out.DNSSearch = flags.DNSSearch
 	}
 	return out
 }

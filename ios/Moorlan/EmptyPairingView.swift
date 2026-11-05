@@ -6,14 +6,14 @@ struct EmptyPairingView: View {
     var body: some View {
         NavigationStack {
             ContentUnavailableView {
-                Label("Pair with your WireGuard host", systemImage: "qrcode.viewfinder")
+                Label("Pair with your home", systemImage: "qrcode.viewfinder")
             } description: {
-                Text("Run moorlan on the WireGuard host (see moorlan.conf), then scan the QR from a home network.")
+                Text("Scan the QR from your Moorlan host while on home Wi‑Fi.")
             } actions: {
                 Button {
                     onScan()
                 } label: {
-                    Text("Start QR Scan")
+                    Text("Scan QR")
                         .font(.body.weight(.semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 4)
