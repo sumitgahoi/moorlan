@@ -15,28 +15,24 @@ import (
 )
 
 type Host struct {
-	Snap      iface.Snapshot
-	StorePath string
-	PairIP    string
-	HomeCIDRs []string
-	DNS       []string
-	DNSSearch []string
-	PairHost  string
-	PairPort  int
-	Endpoint  string
+	Snap         iface.Snapshot
+	StorePath    string
+	PairIP       string
+	HomeNetworks []string
+	DNSServers   []string
+	DNSSearch    []string
+	PairHost     string
+	PairPort     int
+	Endpoint     string
 }
 
-// Discover opens an existing moorlanN device for pairing (needs pool + listen port).
-func Discover(wgName, storePath, privateEndpoint, homeCIDRs, publicEndpoint, dns, dnsSearch string) (Host, error) {
-	host, err := discover(wgName, storePath, privateEndpoint, homeCIDRs, publicEndpoint, true)
+// Discover opens an existing WireGuard device for pairing (needs pool + listen port).
+func Discover(wgName, storePath, privateEndpoint, homeNetworks, publicEndpoint, dnsServers, dnsSearch string) (Host, error) {
+	host, err := discover(wgName, storePath, privateEndpoint, homeNetworks, publicEndpoint, true)
 	if err != nil {
 		return Host{}, err
 	}
-	pool, err := iface.SelectPool(host.Snap.Addresses)
-	if err != nil {
-		return Host{}, err
-	}
-	servers, err := parseDNSServers(dns, host.HomeCIDRs, pool.Own)
+	servers, err := parseDNSServers(dnsServers)
 	if err != nil {
 		return Host{}, err
 	}
@@ -45,15 +41,15 @@ func Discover(wgName, storePath, privateEndpoint, homeCIDRs, publicEndpoint, dns
 		return Host{}, err
 	}
 	if len(search) > 0 && len(servers) == 0 {
-		return Host{}, fmt.Errorf("dns-search requires dns (point phones at the resolver that serves those domains)")
+		return Host{}, fmt.Errorf("dns-search requires dns-servers (point phones at the resolver that serves those domains)")
 	}
-	host.DNS = servers
+	host.DNSServers = servers
 	host.DNSSearch = search
 	return host, nil
 }
 
 // DiscoverUnpair opens the device for the unpair HTTP service.
-// Only -private-endpoint is required (listen address); home CIDRs are for pairing leases.
+// Only private-endpoint is required (listen address); home-networks are for pairing leases.
 func DiscoverUnpair(wgName, storePath, privateEndpoint string) (Host, error) {
 	host, err := DiscoverDevice(wgName, storePath)
 	if err != nil {
@@ -69,12 +65,12 @@ func DiscoverUnpair(wgName, storePath, privateEndpoint string) (Host, error) {
 	return host, nil
 }
 
-// DiscoverDevice opens the device for rehydrate or --remove (no LAN control address).
+// DiscoverDevice opens the device for reconcile or --remove (no LAN control address).
 func DiscoverDevice(wgName, storePath string) (Host, error) {
 	return discover(wgName, storePath, "", "", "", false)
 }
 
-func discover(wgName, storePath, privateEndpoint, homeCIDRs, publicEndpoint string, pairing bool) (Host, error) {
+func discover(wgName, storePath, privateEndpoint, homeNetworks, publicEndpoint string, pairing bool) (Host, error) {
 	if runtime.GOOS != "linux" {
 		return Host{}, fmt.Errorf("Moorlan server requires Linux")
 	}
@@ -111,7 +107,7 @@ func discover(wgName, storePath, privateEndpoint, homeCIDRs, publicEndpoint stri
 		StorePath: storePath,
 		Endpoint:  publicEndpoint,
 	}
-	if privateEndpoint == "" && homeCIDRs == "" {
+	if privateEndpoint == "" && homeNetworks == "" {
 		if publicEndpoint != "" {
 			if _, _, err := payload.SplitEndpoint(publicEndpoint); err != nil {
 				return Host{}, err
@@ -119,7 +115,7 @@ func discover(wgName, storePath, privateEndpoint, homeCIDRs, publicEndpoint stri
 		}
 		return host, nil
 	}
-	cidrs, err := parseHomeCIDRs(homeCIDRs)
+	cidrs, err := parseHomeNetworks(homeNetworks)
 	if err != nil {
 		return Host{}, err
 	}
@@ -131,7 +127,7 @@ func discover(wgName, storePath, privateEndpoint, homeCIDRs, publicEndpoint stri
 		}
 		subnet = pool.Network
 	}
-	if err := validateHomeCIDRs(cidrs, subnet); err != nil {
+	if err := validateHomeNetworks(cidrs, subnet); err != nil {
 		return Host{}, err
 	}
 	pairIP, pairPort, err := resolvePrivateEndpoint(wgName, privateEndpoint, cidrs)
@@ -144,14 +140,14 @@ func discover(wgName, storePath, privateEndpoint, homeCIDRs, publicEndpoint stri
 	if _, _, err := payload.SplitEndpoint(publicEndpoint); err != nil {
 		return Host{}, err
 	}
-	host.HomeCIDRs = cidrs
+	host.HomeNetworks = cidrs
 	host.PairIP = pairIP
 	host.PairHost = pairIP
 	host.PairPort = pairPort
 	return host, nil
 }
 
-// validateInterface requires a usable WireGuard device. Rehydrate fails (and
+// validateInterface requires a usable WireGuard device. Reconcile fails (and
 // systemd retries) until listen port and the private IPv4 pool are present.
 func validateInterface(device *wgtypes.Device, addresses []string) error {
 	if device.PublicKey == (wgtypes.Key{}) {
@@ -213,10 +209,10 @@ func ipv4PrefixFullyPrivate(network *net.IPNet) bool {
 	return false
 }
 
-func parseHomeCIDRs(text string) ([]string, error) {
+func parseHomeNetworks(text string) ([]string, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
-		return nil, fmt.Errorf("home CIDRs required; pass -home-cidrs (for example -home-cidrs 10.10.0.0/24,10.10.10.0/24,10.10.20.0/24,10.10.30.0/24,10.10.40.0/24)")
+		return nil, fmt.Errorf("home-networks required (for example home-networks=10.10.0.0/24,10.10.10.0/24)")
 	}
 	var out []string
 	seen := map[string]bool{}
@@ -227,14 +223,14 @@ func parseHomeCIDRs(text string) ([]string, error) {
 		}
 		_, network, err := net.ParseCIDR(part)
 		if err != nil {
-			return nil, fmt.Errorf("invalid -home-cidrs CIDR %q", part)
+			return nil, fmt.Errorf("invalid home-networks CIDR %q", part)
 		}
 		ones, bits := network.Mask.Size()
 		if network.IP.To4() == nil || bits != 32 || ones < 8 || ones > 32 {
-			return nil, fmt.Errorf("unsupported -home-cidrs %s: use an IPv4 prefix from /8 through /32", network)
+			return nil, fmt.Errorf("unsupported home-networks %s: use an IPv4 prefix from /8 through /32", network)
 		}
 		if !ipv4PrefixFullyPrivate(network) {
-			return nil, fmt.Errorf("unsupported -home-cidrs %s: entire prefix must lie in a private IPv4 range", network)
+			return nil, fmt.Errorf("unsupported home-networks %s: entire prefix must lie in a private IPv4 range", network)
 		}
 		cidr := network.String()
 		if seen[cidr] {
@@ -244,39 +240,39 @@ func parseHomeCIDRs(text string) ([]string, error) {
 		out = append(out, cidr)
 	}
 	if len(out) == 0 {
-		return nil, fmt.Errorf("home CIDRs required; pass -home-cidrs (for example -home-cidrs 10.10.0.0/24,10.10.10.0/24,10.10.20.0/24,10.10.30.0/24,10.10.40.0/24)")
+		return nil, fmt.Errorf("home-networks required (for example home-networks=10.10.0.0/24,10.10.10.0/24)")
 	}
 	return out, nil
 }
 
-func resolvePrivateEndpoint(wgName, endpoint string, homeCIDRs []string) (string, int, error) {
+func resolvePrivateEndpoint(wgName, endpoint string, homeNetworks []string) (string, int, error) {
 	endpoint = strings.TrimSpace(endpoint)
 	if endpoint == "" {
-		return "", 0, fmt.Errorf("private endpoint required; pass -private-endpoint (for example -private-endpoint 10.10.10.1:8756)")
+		return "", 0, fmt.Errorf("private-endpoint required (for example private-endpoint=10.10.10.1:8756)")
 	}
 	host, portText, err := payload.SplitEndpoint(endpoint)
 	if err != nil {
-		return "", 0, fmt.Errorf("invalid -private-endpoint: %w", err)
+		return "", 0, fmt.Errorf("invalid private-endpoint: %w", err)
 	}
 	port, _ := strconv.Atoi(portText)
 	ip := net.ParseIP(host)
 	if ip == nil || ip.To4() == nil || !ip.IsPrivate() {
-		return "", 0, fmt.Errorf("unsupported -private-endpoint host %s: use a private IPv4 address configured on this host", host)
+		return "", 0, fmt.Errorf("unsupported private-endpoint host %s: use a private IPv4 address configured on this host", host)
 	}
 	ip = ip.To4()
 	if !localIPv4Configured(wgName, ip) {
-		return "", 0, fmt.Errorf("-private-endpoint host %s is not configured on this host", ip)
+		return "", 0, fmt.Errorf("private-endpoint host %s is not configured on this host", ip)
 	}
-	if len(homeCIDRs) == 0 {
+	if len(homeNetworks) == 0 {
 		return ip.String(), port, nil
 	}
-	for _, cidr := range homeCIDRs {
+	for _, cidr := range homeNetworks {
 		_, network, err := net.ParseCIDR(cidr)
 		if err == nil && network.Contains(ip) {
 			return ip.String(), port, nil
 		}
 	}
-	return "", 0, fmt.Errorf("-private-endpoint host %s is outside -home-cidrs (%s)", ip, strings.Join(homeCIDRs, ","))
+	return "", 0, fmt.Errorf("private-endpoint host %s is outside home-networks (%s)", ip, strings.Join(homeNetworks, ","))
 }
 
 func localIPv4Configured(wgName string, want net.IP) bool {
@@ -305,36 +301,24 @@ func localIPv4Configured(wgName string, want net.IP) bool {
 	return false
 }
 
-func validateHomeCIDRs(homeCIDRs []string, tunnel *net.IPNet) error {
-	for _, cidr := range homeCIDRs {
+func validateHomeNetworks(homeNetworks []string, tunnel *net.IPNet) error {
+	for _, cidr := range homeNetworks {
 		_, network, err := net.ParseCIDR(cidr)
 		if err != nil || !ipv4PrefixFullyPrivate(network) {
-			return fmt.Errorf("unsupported home CIDR: entire prefix must lie in a private IPv4 range")
+			return fmt.Errorf("unsupported home-networks: entire prefix must lie in a private IPv4 range")
 		}
 		if tunnel != nil && (tunnel.Contains(network.IP) || network.Contains(tunnel.IP)) {
-			return fmt.Errorf("unsupported setup: WireGuard subnet and home CIDR %s must not overlap", cidr)
+			return fmt.Errorf("unsupported setup: WireGuard subnet and home-networks %s must not overlap", cidr)
 		}
 	}
 	return nil
 }
 
-// parseDNSServers resolves optional lease DNS. Empty text means no DNS in the
-// lease (phone keeps its own fallback). Explicit values must be the WireGuard
-// tunnel address or lie inside home CIDRs so phones can reach them over the
-// leased routes.
-func parseDNSServers(text string, homeCIDRs []string, tunnelOwn net.IP) ([]string, error) {
+// parseDNSServers requires one or more unicast IPv4 resolvers (private or public).
+func parseDNSServers(text string) ([]string, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
-		return nil, nil
-	}
-	own := tunnelOwn.To4()
-	var networks []*net.IPNet
-	for _, cidr := range homeCIDRs {
-		_, network, err := net.ParseCIDR(cidr)
-		if err != nil {
-			return nil, fmt.Errorf("invalid home CIDR %q", cidr)
-		}
-		networks = append(networks, network)
+		return nil, fmt.Errorf("dns-servers required (unicast IPv4 resolvers, e.g. dns-servers=10.10.10.53 or 1.1.1.1)")
 	}
 	var out []string
 	seen := map[string]bool{}
@@ -344,25 +328,16 @@ func parseDNSServers(text string, homeCIDRs []string, tunnelOwn net.IP) ([]strin
 			continue
 		}
 		ip := net.ParseIP(part)
-		if ip == nil || ip.To4() == nil || !ip.IsPrivate() {
-			return nil, fmt.Errorf("unsupported -dns %q: use the tunnel address or a private IPv4 inside -home-cidrs", part)
+		if ip == nil || ip.To4() == nil {
+			return nil, fmt.Errorf("unsupported dns-servers %q: use a unicast IPv4 address", part)
 		}
 		ip = ip.To4()
-		ok := own != nil && ip.Equal(own)
-		if !ok {
-			for _, network := range networks {
-				if network.Contains(ip) {
-					ok = true
-					break
-				}
-			}
+		if ip.IsUnspecified() || ip.IsMulticast() || ip.IsLoopback() || ip[0] == 255 {
+			return nil, fmt.Errorf("unsupported dns-servers %s: use a unicast IPv4 address", ip)
 		}
-		if !ok {
-			hint := strings.Join(homeCIDRs, ",")
-			if own != nil {
-				return nil, fmt.Errorf("-dns %s must be the WireGuard tunnel address (%s) or inside -home-cidrs (%s)", ip, own, hint)
-			}
-			return nil, fmt.Errorf("-dns %s must be inside -home-cidrs (%s)", ip, hint)
+		// Reject limited broadcast and class-E / experimental as non-unicast for resolvers.
+		if ip.Equal(net.IPv4bcast) {
+			return nil, fmt.Errorf("unsupported dns-servers %s: use a unicast IPv4 address", ip)
 		}
 		addr := ip.String()
 		if seen[addr] {
@@ -370,6 +345,9 @@ func parseDNSServers(text string, homeCIDRs []string, tunnelOwn net.IP) ([]strin
 		}
 		seen[addr] = true
 		out = append(out, addr)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("dns-servers required (unicast IPv4 resolvers, e.g. dns-servers=10.10.10.53 or 1.1.1.1)")
 	}
 	return out, nil
 }
@@ -403,25 +381,25 @@ func parseDNSSearch(text string) ([]string, error) {
 
 func validateDNSSearchDomain(domain string) error {
 	if len(domain) > 253 {
-		return fmt.Errorf("unsupported -dns-search %q: too long", domain)
+		return fmt.Errorf("unsupported dns-search %q: too long", domain)
 	}
 	labels := strings.Split(domain, ".")
 	if len(labels) < 1 {
-		return fmt.Errorf("unsupported -dns-search %q", domain)
+		return fmt.Errorf("unsupported dns-search %q", domain)
 	}
 	for _, label := range labels {
 		if label == "" || len(label) > 63 {
-			return fmt.Errorf("unsupported -dns-search %q: empty or oversized label", domain)
+			return fmt.Errorf("unsupported dns-search %q: empty or oversized label", domain)
 		}
 		if label[0] == '-' || label[len(label)-1] == '-' {
-			return fmt.Errorf("unsupported -dns-search %q: label cannot start or end with '-'", domain)
+			return fmt.Errorf("unsupported dns-search %q: label cannot start or end with '-'", domain)
 		}
 		for i := 0; i < len(label); i++ {
 			c := label[i]
 			if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' {
 				continue
 			}
-			return fmt.Errorf("unsupported -dns-search %q: invalid character", domain)
+			return fmt.Errorf("unsupported dns-search %q: invalid character", domain)
 		}
 	}
 	return nil
@@ -436,20 +414,5 @@ func devicePeers(device *wgtypes.Device) []iface.Peer {
 		}
 		out = append(out, item)
 	}
-	return out
-}
-
-// HomeCIDRLease returns the lease lan field (comma-separated CIDRs for away routes).
-func (h Host) HomeCIDRLease() string {
-	return strings.Join(h.HomeCIDRs, ",")
-}
-
-// RoutePrefixes is the tunnel pool plus every home CIDR.
-func (h Host) RoutePrefixes(poolNetwork string) []string {
-	out := make([]string, 0, 1+len(h.HomeCIDRs))
-	if poolNetwork != "" {
-		out = append(out, poolNetwork)
-	}
-	out = append(out, h.HomeCIDRs...)
 	return out
 }

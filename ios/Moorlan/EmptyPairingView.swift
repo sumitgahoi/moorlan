@@ -13,7 +13,7 @@ struct EmptyPairingView: View {
                 Button {
                     onScan()
                 } label: {
-                    Text("Scan QR")
+                    Text("Scan to pair")
                         .font(.body.weight(.semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 4)

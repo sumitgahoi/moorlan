@@ -27,7 +27,7 @@ type Assigner struct {
 }
 
 // OpenAssigner opens the peer database. It does not touch the live device;
-// call Reconcile (rehydrate) or mutate via Assign/Remove to apply peers.
+// call Reconcile or mutate via Assign/Remove to apply peers.
 func OpenAssigner(ctx context.Context, host Host) (*Assigner, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -79,8 +79,8 @@ func (a *Assigner) client() (wireguardClient, error) {
 	return wgctrl.New()
 }
 
-// Reconcile applies SQLite to the live device: pending removals, install DB
-// peers, drop orphans (the interface is exclusively owned by Moorlan).
+// Reconcile applies SQLite to the live device: ensure each DB peer is present
+// with correct AllowedIPs, then remove every live peer absent from the DB.
 func (a *Assigner) Reconcile(ctx context.Context) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -100,10 +100,6 @@ func (a *Assigner) reconcile(ctx context.Context, client wireguardClient) error 
 	if err != nil {
 		return err
 	}
-	removals, err := a.store.pending(ctx)
-	if err != nil {
-		return err
-	}
 	device, err := client.Device(a.Host.Snap.Name)
 	if err != nil {
 		return err
@@ -111,19 +107,12 @@ func (a *Assigner) reconcile(ctx context.Context, client wireguardClient) error 
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	for _, value := range removals {
-		key, err := wgtypes.ParseKey(value)
+	managed := peerKeys(peers)
+	for _, p := range peers {
+		key, network, err := peerInstallSpec(p)
 		if err != nil {
 			return err
 		}
-		if err = client.ConfigureDevice(device.Name, wgtypes.Config{Peers: []wgtypes.PeerConfig{{PublicKey: key, Remove: true}}}); err != nil {
-			return fmt.Errorf("remove live peer: %w", err)
-		}
-	}
-	managed := peerKeys(peers)
-	for _, p := range peers {
-		key, _ := wgtypes.ParseKey(p.PublicKey)
-		_, network, _ := net.ParseCIDR(p.AllowedIPs[0])
 		var existing *wgtypes.Peer
 		for i := range device.Peers {
 			if device.Peers[i].PublicKey == key {
@@ -153,8 +142,22 @@ func (a *Assigner) reconcile(ctx context.Context, client wireguardClient) error 
 			return fmt.Errorf("remove orphan live peer: %w", err)
 		}
 	}
-	_, err = a.store.db.ExecContext(ctx, "DELETE FROM pending_removals")
-	return err
+	return nil
+}
+
+func peerInstallSpec(p iface.Peer) (wgtypes.Key, *net.IPNet, error) {
+	key, err := wgtypes.ParseKey(p.PublicKey)
+	if err != nil {
+		return wgtypes.Key{}, nil, fmt.Errorf("peer %q: invalid public key: %w", p.PublicKey, err)
+	}
+	if len(p.AllowedIPs) == 0 {
+		return wgtypes.Key{}, nil, fmt.Errorf("peer %q: missing address", p.PublicKey)
+	}
+	_, network, err := net.ParseCIDR(p.AllowedIPs[0])
+	if err != nil || network == nil {
+		return wgtypes.Key{}, nil, fmt.Errorf("peer %q: invalid address %q", p.PublicKey, p.AllowedIPs[0])
+	}
+	return key, network, nil
 }
 
 func peerKeys(peers []iface.Peer) map[string]bool {
@@ -197,15 +200,6 @@ func (a *Assigner) Assign(ctx context.Context, publicKey, label string) (pair.Le
 		return pair.Lease{}, err
 	}
 	defer client.Close()
-	pending, err := a.store.pending(ctx)
-	if err != nil {
-		return pair.Lease{}, err
-	}
-	if len(pending) != 0 {
-		if err = a.reconcile(ctx, client); err != nil {
-			return pair.Lease{}, err
-		}
-	}
 	device, err := client.Device(a.Host.Snap.Name)
 	if err != nil {
 		return pair.Lease{}, err
@@ -217,7 +211,7 @@ func (a *Assigner) Assign(ctx context.Context, publicKey, label string) (pair.Le
 	managed := peerKeys(peers)
 	for _, p := range device.Peers {
 		if p.PublicKey == key && !managed[publicKey] {
-			return pair.Lease{}, fmt.Errorf("existing live peer is not in the Moorlan database; run --rehydrate or remove it first")
+			return pair.Lease{}, fmt.Errorf("existing live peer is not in the Moorlan database; run --reconcile or remove it first")
 		}
 	}
 	pool, err := iface.SelectPool(a.Host.Snap.Addresses)
@@ -251,5 +245,17 @@ func (a *Assigner) Assign(ctx context.Context, publicKey, label string) (pair.Le
 	if err = a.reconcile(ctx, client); err != nil {
 		return pair.Lease{}, err
 	}
-	return pair.Lease{Address: address, Prefixes: a.Host.RoutePrefixes(pool.Network.String()), LAN: a.Host.HomeCIDRLease(), DNS: append([]string(nil), a.Host.DNS...), DNSSearch: append([]string(nil), a.Host.DNSSearch...), PublicKey: device.PublicKey.String(), Endpoint: a.Host.Endpoint, MTU: a.Host.Snap.MTU, PersistentKeepalive: 25, UnpairToken: credential, Label: label}, nil
+	return pair.Lease{
+		Address:             address,
+		TunnelNetwork:       pool.Network.String(),
+		HomeNetworks:        append([]string(nil), a.Host.HomeNetworks...),
+		DNSServers:          append([]string(nil), a.Host.DNSServers...),
+		DNSSearch:           append([]string(nil), a.Host.DNSSearch...),
+		PublicKey:           device.PublicKey.String(),
+		Endpoint:            a.Host.Endpoint,
+		MTU:                 a.Host.Snap.MTU,
+		PersistentKeepalive: 25,
+		UnpairToken:         credential,
+		Label:               label,
+	}, nil
 }

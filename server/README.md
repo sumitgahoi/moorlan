@@ -41,7 +41,9 @@ curl -fsSL -o "${ASSET}" "${BASE}/${ASSET}"
 curl -fsSL -o "${ASSET}.sha256" "${BASE}/${ASSET}.sha256"
 sha256sum -c "${ASSET}.sha256"
 sudo install -m 755 "${ASSET}" /usr/local/bin/moorlan
-# release also ships moorlan.conf.example → /usr/share/moorlan/
+curl -fsSL -o moorlan.conf.example "${BASE}/moorlan.conf.example"
+sudo mkdir -p /usr/share/moorlan
+sudo install -m 644 moorlan.conf.example /usr/share/moorlan/moorlan.conf.example
 
 sudo mkdir -p /etc/moorlan
 sudo cp /usr/share/moorlan/moorlan.conf.example /etc/moorlan/wg0.conf

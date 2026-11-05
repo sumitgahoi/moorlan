@@ -9,20 +9,29 @@ public struct ServerStore {
         self.defaults = defaults
     }
 
-    public func loadServers() -> [PairedServer] {
+    public func loadServers() throws -> [PairedServer] {
         guard let data = defaults.data(forKey: key) else { return [] }
-        return (try? JSONDecoder().decode([PairedServer].self, from: data)) ?? []
+        do {
+            return try JSONDecoder().decode([PairedServer].self, from: data)
+        } catch {
+            throw MoorlanError.storageFailed
+        }
     }
 
-    public func saveServers(_ servers: [PairedServer]) {
-        guard let data = try? JSONEncoder().encode(servers) else { return }
+    public func saveServers(_ servers: [PairedServer]) throws {
+        let data: Data
+        do {
+            data = try JSONEncoder().encode(servers)
+        } catch {
+            throw MoorlanError.storageFailed
+        }
         defaults.set(data, forKey: key)
     }
 
-    public func upsert(_ server: PairedServer) {
-        var servers = loadServers().filter { $0.publicKey != server.publicKey }
+    public func upsert(_ server: PairedServer) throws {
+        var servers = try loadServers().filter { $0.publicKey != server.publicKey }
         servers.insert(server, at: 0)
-        saveServers(servers)
+        try saveServers(servers)
     }
 
     public func loadPolicy() -> TunnelPolicy {
@@ -33,12 +42,21 @@ public struct ServerStore {
                 trustedNetworkIDs: Set(old.trustedNetworkIDs.filter { $0.hasPrefix("ssid:") }),
                 treatCellularAsTrusted: old.treatCellularAsTrusted)
         }
+        // Corrupt policy blob: fall back to defaults rather than wiping trusted SSIDs silently mid-session.
         return TunnelPolicy()
     }
-    public func savePolicy(_ policy: TunnelPolicy) {
-        if let data = try? JSONEncoder().encode(policy) { defaults.set(data, forKey: policyKey) }
+
+    public func savePolicy(_ policy: TunnelPolicy) throws {
+        let data: Data
+        do {
+            data = try JSONEncoder().encode(policy)
+        } catch {
+            throw MoorlanError.storageFailed
+        }
+        defaults.set(data, forKey: policyKey)
     }
 }
+
 private struct LegacyPolicy: Codable {
     var exitNodeEnabled: Bool
     var trustedNetworkIDs: [String]

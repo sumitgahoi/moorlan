@@ -7,18 +7,21 @@ import Combine
 @MainActor
 final class TunnelManager: ObservableObject {
     enum Status: Equatable { case disconnected, connecting, connected, disconnecting, invalid }
-    enum NetworkRole: String, CaseIterable { case home, trusted, normal }
+    /// Home ≠ Trusted ≠ Away. Home always disconnects; Trusted is subnet in Automatic.
+    enum NetworkRole: String, CaseIterable { case home, trusted, away }
 
     @Published private(set) var status: Status = .disconnected
     @Published private(set) var statusReason: String?
     @Published var policy: TunnelPolicy
     @Published private(set) var servers: [PairedServer]
     @Published private(set) var selectedServerID: String?
-    @Published var lastError: String?
+    @Published var presentedError: UserFacingError?
     @Published private(set) var isUnpairing = false
     /// Formatted live rates while connected, e.g. "↓ 1.2 MB/s  ↑ 84 KB/s".
     @Published private(set) var transferRates: String?
     @Published private(set) var transferRatesAccessibility = ""
+    /// Named Wi‑Fi that still needs a Home / Trusted / Away choice.
+    @Published var pendingNetworkRoleID: String?
 
     private let store = ServerStore()
     private let identityStore = IdentityStore(accessGroup: AppIdentity.keychainAccessGroup)
@@ -30,10 +33,13 @@ final class TunnelManager: ObservableObject {
     private var applying = false
     private var needsApply = false
     private var userWantsTunnel = true
+    private var intentionalDisconnect = false
     private var statsTask: Task<Void, Never>?
     private var lastRxBytes: UInt64?
     private var lastTxBytes: UInt64?
     private var lastStatsAt: Date?
+    /// Default empty so `@Published` init assignments can run before the UserDefaults load.
+    private var promptedNetworkIDs: Set<String> = []
 
     var selectedServer: PairedServer? { servers.first { $0.id == selectedServerID } ?? servers.first }
     var pathKind: TunnelPolicy.PathKind { pathMonitor.snapshot.kind }
@@ -45,15 +51,69 @@ final class TunnelManager: ObservableObject {
         guard let id = currentNetworkID, let server = selectedServer else { return false }
         return server.homeSSIDs.contains(id)
     }
+    /// Wi‑Fi is up but SSID is unknown — must not connect/exit (hairpin risk).
+    var wifiIdentityMissing: Bool {
+        if case .wifi(let id) = pathKind {
+            return !id.hasPrefix("ssid:") || id == "unidentified"
+        }
+        return false
+    }
     var effectiveExit: Bool {
         if case .connect(let full) = policy.decide(path: pathKind, homeSSIDs: selectedServer?.homeSSIDs ?? []) { return full }
         return false
     }
+    /// Plain-English hero line for the selected tunnel and path.
+    var statusHeadline: String {
+        if wifiIdentityMissing { return "Waiting for Wi‑Fi name" }
+        if onHomeWiFi { return "Off at home" }
+        switch status {
+        case .connected:
+            return effectiveExit ? "Connected · Full protection" : "Connected · Home access"
+        case .connecting: return "Connecting"
+        case .disconnecting: return "Disconnecting"
+        case .invalid: return "Needs attention"
+        case .disconnected:
+            if statusReason == "Waiting for a network" { return "Waiting for a network" }
+            if statusReason == "Wi‑Fi name unavailable" { return "Waiting for Wi‑Fi name" }
+            return "Disconnected"
+        }
+    }
+    var statusDetail: String {
+        if wifiIdentityMissing || statusReason == "Wi‑Fi name unavailable" {
+            return "Moorlan needs this network’s name before connecting, so it never full-tunnels on home by mistake."
+        }
+        if onHomeWiFi { return "You’re already on this LAN, so the tunnel stays off." }
+        switch status {
+        case .connected:
+            return effectiveExit
+                ? "All traffic goes through home."
+                : "Only your home networks are reached through the tunnel."
+        case .connecting: return "Reaching your home…"
+        case .disconnecting: return "Closing the tunnel…"
+        case .invalid:
+            return statusReason ?? "Check VPN permission in Settings."
+        case .disconnected:
+            if statusReason == "Waiting for a network" {
+                return "Connect to Wi‑Fi or cellular, then try again."
+            }
+            if statusReason == "Off at home" {
+                return "You’re already on this LAN, so the tunnel stays off."
+            }
+            return "Tap Connect when you’re away from home."
+        }
+    }
 
     init() {
         policy = store.loadPolicy()
-        servers = store.loadServers()
+        do {
+            servers = try store.loadServers()
+        } catch {
+            servers = []
+            // Defer error presentation until after init completes.
+            Task { @MainActor in self.present(error) }
+        }
         selectedServerID = UserDefaults.standard.string(forKey: "selected-server") ?? servers.first?.id
+        promptedNetworkIDs = Set(UserDefaults.standard.stringArray(forKey: Self.promptedNetworksKey) ?? [])
         observePath()
         observeVPN()
         pathMonitor.start()
@@ -62,30 +122,25 @@ final class TunnelManager: ObservableObject {
     deinit { observers.forEach(NotificationCenter.default.removeObserver) }
 
     func savePolicy() {
-        store.savePolicy(policy)
+        do {
+            try store.savePolicy(policy)
+        } catch {
+            present(error)
+            return
+        }
         lastProfile = nil
         Task { await applyDesiredState() }
     }
 
-    /// Updates phone-owned tunnel knobs for the selected host and refreshes the VPN profile.
-    func saveClientSettings(_ client: ClientTunnelSettings) {
-        guard var server = selectedServer else { return }
-        server.client = client
-        upsertServer(server)
-        lastProfile = nil
-        Task { await applyDesiredState() }
-    }
-
-    func setExit(_ enabled: Bool) { policy.mode = enabled ? .exit : .split; savePolicy() }
     func identifyWiFi() { WiFiIdentity.requestAccess(into: pathMonitor) }
 
     func networkRole(for id: String) -> NetworkRole {
         if selectedServer?.homeSSIDs.contains(id) == true { return .home }
         if policy.trustedNetworkIDs.contains(id) { return .trusted }
-        return .normal
+        return .away
     }
 
-    /// Home = tunnel off; Trusted = connected with Exit Node off in Automatic; Normal = neither.
+    /// Home = tunnel off; Trusted = subnet in Automatic; Away = exit in Automatic.
     func setNetworkRole(_ role: NetworkRole, for id: String) {
         guard var server = selectedServer else { return }
         switch role {
@@ -96,10 +151,13 @@ final class TunnelManager: ObservableObject {
             server.homeSSIDs.remove(id)
             policy.trustedNetworkIDs.insert(id)
             if policy.mode != .automatic { policy.mode = .automatic }
-        case .normal:
+        case .away:
             server.homeSSIDs.remove(id)
             policy.trustedNetworkIDs.remove(id)
         }
+        promptedNetworkIDs.insert(id)
+        persistPromptedNetworks()
+        if pendingNetworkRoleID == id { pendingNetworkRoleID = nil }
         upsertServer(server)
         savePolicy()
     }
@@ -119,8 +177,6 @@ final class TunnelManager: ObservableObject {
     }
 
     /// Admin-visible peer name sent at pair time (`moorlan --list-peers`).
-    /// iOS 16+ returns a generic model from `UIDevice.current.name` unless Apple
-    /// grants a restricted entitlement, so the user can set this explicitly.
     var deviceLabel: String {
         get {
             let stored = UserDefaults.standard.string(forKey: Self.deviceLabelKey)?
@@ -141,27 +197,61 @@ final class TunnelManager: ObservableObject {
     }
 
     private static let deviceLabelKey = "device-label"
+    private static let promptedNetworksKey = "prompted-network-ids"
+    private static let rolesCoachKey = "network-roles-coach-seen"
+
+    var shouldShowRolesCoach: Bool {
+        !UserDefaults.standard.bool(forKey: Self.rolesCoachKey) && !servers.isEmpty
+    }
+
+    func dismissRolesCoach() {
+        UserDefaults.standard.set(true, forKey: Self.rolesCoachKey)
+        objectWillChange.send()
+    }
+
+    func clearPresentedError() { presentedError = nil }
+
+    func present(_ error: UserFacingError) {
+        presentedError = error
+    }
+
+    func present(_ error: Error) {
+        presentedError = UserFacingError.map(error)
+    }
+
+    func retryAfterError() async {
+        clearPresentedError()
+        userWantsTunnel = true
+        lastProfile = nil
+        await applyDesiredState()
+    }
 
     func pair(card: QRCard) async throws {
+        try Task.checkCancellation()
         try await LocalNetworkAuthorization.shared.ensureAccess(to: card.pairURL)
+        try Task.checkCancellation()
         let identity = try identityStore.loadOrCreate()
         let lease = try await PairingClient().pair(
             card: card,
             publicKey: identity.publicKey,
             label: deviceLabel
         )
+        try Task.checkCancellation()
         var server = PairedServer(card: card, lease: lease)
+        // Re-pair of the same host keeps prior Home/Trusted classification for that host.
         if let existing = servers.first(where: { $0.publicKey == server.publicKey }) {
             server.homeSSIDs = existing.homeSSIDs
-            server.client = existing.client
         }
         if let id = currentNetworkID {
             server.homeSSIDs.insert(id)
+            promptedNetworkIDs.insert(id)
+            persistPromptedNetworks()
         }
-        store.upsert(server)
-        servers = store.loadServers()
+        // Upsert one host; never wipe other paired tunnels.
+        try store.upsert(server)
+        servers = try store.loadServers()
         await selectProfile(server.id)
-        // Install the native profile even on home Wi‑Fi, where starting it is forbidden.
+        // Install a distinct native profile even on home Wi‑Fi, where starting it is forbidden.
         _ = try await configureProfile(server)
         await applyDesiredState()
     }
@@ -169,6 +259,7 @@ final class TunnelManager: ObservableObject {
     func selectProfile(_ id: String) async {
         guard !isUnpairing, servers.contains(where: { $0.id == id }) else { return }
         if selectedServerID != id {
+            intentionalDisconnect = true
             manager?.isOnDemandEnabled = false
             try? await manager?.moorlan_saveToPreferences()
             manager?.connection.stopVPNTunnel()
@@ -181,7 +272,14 @@ final class TunnelManager: ObservableObject {
     }
 
     func unpair(scanned card: UnpairCard) async -> Bool {
-        guard !isUnpairing, !applying else { lastError = "VPN configuration is busy. Retry shortly."; return false }
+        guard !isUnpairing, !applying else {
+            present(UserFacingError(
+                title: "Try again shortly",
+                message: "VPN configuration is busy. Wait a moment, then retry.",
+                action: .retry
+            ))
+            return false
+        }
         do {
             let server = try card.pairedServer(in: servers)
             if !server.homeSSIDs.isEmpty {
@@ -193,43 +291,71 @@ final class TunnelManager: ObservableObject {
             defer { isUnpairing = false }
             guard let identity = try identityStore.load() ?? IdentityStore().load() else { throw MoorlanError.missingIdentity }
             try await LocalNetworkAuthorization.shared.ensureAccess(to: card.unpairURL)
-            try await PairingClient().unpair(server: server, publicKey: identity.publicKey, card: card)
-            let installed = try await NETunnelProviderManager.moorlan_loadAllFromPreferences()
-            for profile in installed where matches(profile, server: server) {
-                profile.connection.stopVPNTunnel()
-                try await profile.moorlan_removeFromPreferences()
+            do {
+                try await PairingClient().unpair(server: server, publicKey: identity.publicKey, card: card)
+            } catch MoorlanError.unpairAlreadyGone {
+                // Server already deleted the peer — still clear local state.
             }
-            let defaults = UserDefaults(suiteName: AppIdentity.appGroup)
-            defaults?.removeObject(forKey: TunnelProfile.storageKey(server.id))
-            defaults?.removeObject(forKey: "home-ssid-" + server.id)
-            if selectedServer?.id == server.id {
-                manager = nil
-                defaults?.removeObject(forKey: AppIdentity.configKey) // Remove legacy rendered private configuration.
-                defaults?.removeObject(forKey: AppIdentity.serverNameKey)
-                selectedServerID = servers.first(where: { $0.id != server.id })?.id
-                lastProfile = nil
-                userWantsTunnel = false
-                status = .disconnected
-                statusReason = "Profile deleted"
-            }
-            servers.removeAll { $0.id == server.id }
-            store.saveServers(servers)
-            UserDefaults.standard.set(selectedServerID, forKey: "selected-server")
+            // After server success (or already-gone), always clear local host even if NE cleanup is partial.
+            try await removeLocalHost(server)
             return true
         } catch {
-            lastError = error.localizedDescription
+            present(error)
             return false
         }
+    }
+
+    /// Clears one host from this iPhone without calling the server. Use after a
+    /// confirmed server unpair when local cleanup was interrupted, or when the
+    /// user chooses “Remove from this iPhone” and accepts re-pair if needed.
+    func forgetLocalHost(_ server: PairedServer) async {
+        guard !isUnpairing else { return }
+        isUnpairing = true
+        defer { isUnpairing = false }
+        do {
+            try await removeLocalHost(server)
+        } catch {
+            present(error)
+        }
+    }
+
+    private func removeLocalHost(_ server: PairedServer) async throws {
+        if let installed = try? await NETunnelProviderManager.moorlan_loadAllFromPreferences() {
+            for profile in installed where matches(profile, server: server) {
+                intentionalDisconnect = true
+                profile.connection.stopVPNTunnel()
+                try? await profile.moorlan_removeFromPreferences()
+            }
+        }
+        let defaults = UserDefaults(suiteName: AppIdentity.appGroup)
+        defaults?.removeObject(forKey: TunnelProfile.storageKey(server.id))
+        defaults?.removeObject(forKey: "home-ssid-" + server.id)
+        if selectedServer?.id == server.id {
+            manager = nil
+            defaults?.removeObject(forKey: AppIdentity.configKey)
+            defaults?.removeObject(forKey: AppIdentity.serverNameKey)
+            selectedServerID = servers.first(where: { $0.id != server.id })?.id
+            lastProfile = nil
+            userWantsTunnel = false
+            status = .disconnected
+            statusReason = "Profile deleted"
+        }
+        // Remove one host only; Keychain identity and other tunnels stay.
+        servers.removeAll { $0.id == server.id }
+        try store.saveServers(servers)
+        UserDefaults.standard.set(selectedServerID, forKey: "selected-server")
     }
 
     func toggleDesiredConnection() async {
         if status == .connected || status == .connecting {
             userWantsTunnel = false
+            intentionalDisconnect = true
             manager?.isOnDemandEnabled = false
             try? await manager?.moorlan_saveToPreferences()
             await disconnect()
         } else {
             userWantsTunnel = true
+            clearPresentedError()
             lastProfile = nil
             await applyDesiredState()
         }
@@ -258,11 +384,17 @@ final class TunnelManager: ObservableObject {
             }
             switch decision {
             case .disconnect(let reason):
+                if reason == "Wi‑Fi name unavailable", statusReason != reason {
+                    present(MoorlanError.wifiNameUnavailable)
+                }
                 statusReason = reason
+                intentionalDisconnect = true
                 await disconnect()
             case .connect:
-                // Routing copy is derived in the UI from effectiveExit while connected.
                 statusReason = nil
+                if presentedError?.title == UserFacingError.map(.wifiNameUnavailable).title {
+                    clearPresentedError()
+                }
                 guard userWantsTunnel, let manager else {
                     refreshStatus()
                     return
@@ -271,12 +403,23 @@ final class TunnelManager: ObservableObject {
                     if changed, let session = manager.connection as? NETunnelProviderSession {
                         try session.sendProviderMessage(Data("reload-policy".utf8)) { _ in }
                     }
-                } else if manager.connection.status != .connecting && manager.connection.status != .disconnecting && manager.connection.status != .reasserting {
-                    try manager.connection.startVPNTunnel()
+                } else if manager.connection.status != .connecting
+                            && manager.connection.status != .disconnecting
+                            && manager.connection.status != .reasserting {
+                    do {
+                        try manager.connection.startVPNTunnel()
+                    } catch {
+                        present(mapStartFailure(error))
+                        status = .invalid
+                        return
+                    }
                 }
                 refreshStatus()
             }
-        } catch { lastError = error.localizedDescription; status = .invalid }
+        } catch {
+            present(mapConfigurationFailure(error))
+            status = .invalid
+        }
     }
 
     private func makeProfile(_ server: PairedServer) -> TunnelProfile {
@@ -286,7 +429,10 @@ final class TunnelManager: ObservableObject {
         let identity = try identityStore.loadOrCreate()
         let profile = makeProfile(server)
         _ = try WireGuardProfileBuilder.build(profile, privateKey: identity.privateKey, fullTunnel: false)
-        guard let defaults = UserDefaults(suiteName: AppIdentity.appGroup) else { throw MoorlanError.tunnelFailed("App Group unavailable") }
+        guard let defaults = UserDefaults(suiteName: AppIdentity.appGroup) else {
+            throw MoorlanError.tunnelFailed("App Group unavailable")
+        }
+        // Extension profile: no private key, no unpair_token (stripped in TunnelProfile.init).
         defaults.set(try JSONEncoder().encode(profile), forKey: TunnelProfile.storageKey(server.id))
         let manager = try await loadOrCreateManager(server)
         manager.localizedDescription = "Moorlan · \(server.displayName)"
@@ -306,15 +452,13 @@ final class TunnelManager: ObservableObject {
             manager.onDemandRules = [home, away]
             manager.isOnDemandEnabled = userWantsTunnel
         } else {
-            // Without home SSIDs, avoid an on-demand reconnect loop after the
-            // extension disconnects itself for hairpin protection.
+            // Without home SSIDs, avoid an on-demand reconnect loop after a self-stop at home.
             manager.isOnDemandEnabled = false
             manager.onDemandRules = []
         }
         try await manager.moorlan_saveToPreferences()
         try await manager.moorlan_loadFromPreferences()
         // Legacy builds stored a rendered config including the private key here.
-        // The new extension reads the identity from the shared Keychain instead.
         defaults.removeObject(forKey: AppIdentity.configKey)
         defaults.removeObject(forKey: AppIdentity.serverNameKey)
         return manager
@@ -332,11 +476,18 @@ final class TunnelManager: ObservableObject {
     private func reloadManager() async {
         guard let server = selectedServer else { return }
         do { manager = try await loadOrCreateManager(server); refreshStatus() }
-        catch { lastError = error.localizedDescription; status = .invalid }
+        catch {
+            present(mapConfigurationFailure(error))
+            status = .invalid
+        }
     }
     private func upsertServer(_ server: PairedServer) {
-        store.upsert(server)
-        servers = store.loadServers()
+        do {
+            try store.upsert(server)
+            servers = try store.loadServers()
+        } catch {
+            present(error)
+        }
     }
     func disconnect() async {
         manager?.connection.stopVPNTunnel()
@@ -352,11 +503,14 @@ final class TunnelManager: ObservableObject {
         pathMonitor.$snapshot.removeDuplicates().sink { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
+                self.considerNetworkRolePrompt()
                 await self.applyDesiredState()
             }
         }.store(in: &cancellables)
     }
     private func refreshStatus() {
+        let previous = status
+        let wasIntentional = intentionalDisconnect
         switch manager?.connection.status {
         case .connected: status = .connected
         case .connecting, .reasserting: status = .connecting
@@ -364,7 +518,55 @@ final class TunnelManager: ObservableObject {
         case .invalid: status = .invalid
         default: status = .disconnected
         }
+        // Unexpected drop: generic stop — do not assume another VPN (false positives).
+        if previous == .connected
+            && status == .disconnected
+            && userWantsTunnel
+            && !wasIntentional
+            && !onHomeWiFi
+            && !wifiIdentityMissing
+            && selectedServer != nil {
+            present(MoorlanError.tunnelStopped)
+        }
+        // Keep the intentional flag through .disconnecting so a follow-up
+        // .disconnected notification is not treated as unexpected.
+        if status == .connected || status == .disconnected || status == .invalid {
+            intentionalDisconnect = false
+        }
         updateStatsPolling()
+    }
+
+    private func considerNetworkRolePrompt() {
+        guard let id = currentNetworkID, selectedServer != nil else { return }
+        if networkRole(for: id) != .away { return }
+        if promptedNetworkIDs.contains(id) { return }
+        pendingNetworkRoleID = id
+    }
+
+    private func persistPromptedNetworks() {
+        UserDefaults.standard.set(Array(promptedNetworkIDs), forKey: Self.promptedNetworksKey)
+    }
+
+    private func mapStartFailure(_ error: Error) -> Error {
+        let ns = error as NSError
+        if ns.domain == NEVPNErrorDomain {
+            switch NEVPNError.Code(rawValue: ns.code) {
+            case .configurationDisabled, .configurationInvalid, .configurationStale:
+                return MoorlanError.vpnConfigurationFailed
+            default:
+                break
+            }
+        }
+        return MoorlanError.tunnelStopped
+    }
+
+    private func mapConfigurationFailure(_ error: Error) -> Error {
+        if error is MoorlanError { return error }
+        let ns = error as NSError
+        if ns.domain == NEVPNErrorDomain {
+            return MoorlanError.vpnConfigurationFailed
+        }
+        return error
     }
 
     private func updateStatsPolling() {

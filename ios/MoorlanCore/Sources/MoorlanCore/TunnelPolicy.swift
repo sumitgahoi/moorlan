@@ -22,31 +22,45 @@ public struct TunnelPolicy: Equatable, Codable, Sendable {
         case connect(fullTunnel: Bool)
     }
 
-    /// Home Wi‑Fi (`ssid:Name`) keeps the tunnel off. Trusted Wi‑Fi is split in automatic mode.
+    /// Home Wi‑Fi keeps the tunnel off and wins over manual exit/split.
+    /// Trusted Wi‑Fi and cellular (when trusted) use subnet; Away named Wi‑Fi uses exit.
+    /// Wi‑Fi with unknown SSID fails closed (disconnect) — never exit — to avoid hairpin.
     public func decide(path: PathKind, homeSSIDs: Set<String> = []) -> Decision {
-        if case .wifi(let id) = path, id.hasPrefix("ssid:"), homeSSIDs.contains(id) {
-            return .disconnect(reason: "Tunnel stays off on home Wi‑Fi")
+        if case .wifi(let id) = path {
+            if id.hasPrefix("ssid:"), homeSSIDs.contains(id) {
+                return .disconnect(reason: "Off at home")
+            }
+            // Fail closed: unidentified / non-SSID fingerprints must not become Away/exit.
+            if !id.hasPrefix("ssid:") || id == "unidentified" {
+                return .disconnect(reason: "Wi‑Fi name unavailable")
+            }
         }
         if mode == .exit { return .connect(fullTunnel: true) }
         if mode == .split { return .connect(fullTunnel: false) }
         switch path {
         case .cellular: return .connect(fullTunnel: !treatCellularAsTrusted)
-        case .wifi(let id): return .connect(fullTunnel: !id.hasPrefix("ssid:") || !trustedNetworkIDs.contains(id))
+        case .wifi(let id): return .connect(fullTunnel: !trustedNetworkIDs.contains(id))
         case .other: return .connect(fullTunnel: true)
         }
     }
 
+    /// Split: `tunnel_network ∪ home_networks`. Exit adds default routes.
     public func allowedIPs(lease: Lease, fullTunnel: Bool) -> [String] {
-        var ips = Set(lease.prefixes.filter { !$0.isEmpty && $0 != "0.0.0.0/0" && $0 != "::/0" })
-        for cidr in Self.homeCIDRs(from: lease.lan) { ips.insert(cidr) }
-        if fullTunnel { ips.insert("0.0.0.0/0"); ips.insert("::/0") }
+        var ips = Set<String>()
+        let tunnel = lease.tunnelNetwork.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !tunnel.isEmpty, tunnel != "0.0.0.0/0", tunnel != "::/0" {
+            ips.insert(tunnel)
+        }
+        for cidr in lease.homeNetworks {
+            let trimmed = cidr.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, trimmed != "0.0.0.0/0", trimmed != "::/0" else { continue }
+            ips.insert(trimmed)
+        }
+        if fullTunnel {
+            ips.insert("0.0.0.0/0")
+            ips.insert("::/0")
+        }
         return ips.sorted()
-    }
-
-    /// Away-route prefixes from the lease `lan` field (one CIDR or comma-separated).
-    public static func homeCIDRs(from lan: String?) -> [String] {
-        guard let lan, !lan.isEmpty else { return [] }
-        return lan.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
     }
 
     public static func ssidName(from networkID: String) -> String? {
@@ -57,12 +71,11 @@ public struct TunnelPolicy: Equatable, Codable, Sendable {
 }
 
 /// Non-secret, per-profile input to the Packet Tunnel extension. The private
-/// identity is read separately from the shared Keychain.
+/// identity is read separately from the shared Keychain. `unpair_token` is stripped.
 public struct TunnelProfile: Codable, Equatable, Sendable {
     public var id: String
     public var name: String
     public var lease: Lease
-    public var lan: String?
     public var policy: TunnelPolicy
     public var homeSSIDs: [String]
 
@@ -70,22 +83,8 @@ public struct TunnelProfile: Codable, Equatable, Sendable {
         id = server.id
         name = server.displayName
         lease = server.lease
-        // The extension doesn't need the deletion capability.
+        // App host record keeps unpair_token; the extension never sees it.
         lease.unpairToken = nil
-        // Bake phone overrides into the profile copy; stored lease stays server-owned.
-        if let dns = server.client.dns {
-            lease.dns = dns
-        }
-        if let dnsSearch = server.client.dnsSearch {
-            lease.dnsSearch = dnsSearch
-        }
-        if let mtu = server.client.mtu {
-            lease.mtu = mtu
-        }
-        if let keepalive = server.client.persistentKeepalive {
-            lease.persistentKeepalive = keepalive
-        }
-        lan = server.lan
         self.policy = policy
         homeSSIDs = server.homeSSIDs.sorted()
     }
@@ -95,7 +94,7 @@ public struct TunnelProfile: Codable, Equatable, Sendable {
         id = try c.decode(String.self, forKey: .id)
         name = try c.decode(String.self, forKey: .name)
         lease = try c.decode(Lease.self, forKey: .lease)
-        lan = try c.decodeIfPresent(String.self, forKey: .lan)
+        lease.unpairToken = nil
         policy = try c.decode(TunnelPolicy.self, forKey: .policy)
         if let list = try c.decodeIfPresent([String].self, forKey: .homeSSIDs) {
             homeSSIDs = list
@@ -111,13 +110,12 @@ public struct TunnelProfile: Codable, Equatable, Sendable {
         try c.encode(id, forKey: .id)
         try c.encode(name, forKey: .name)
         try c.encode(lease, forKey: .lease)
-        try c.encodeIfPresent(lan, forKey: .lan)
         try c.encode(policy, forKey: .policy)
         try c.encode(homeSSIDs, forKey: .homeSSIDs)
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, lease, lan, policy, homeSSIDs, homeSSID
+        case id, name, lease, policy, homeSSIDs, homeSSID
     }
 
     public static func storageKey(_ id: String) -> String { "profile-" + id }

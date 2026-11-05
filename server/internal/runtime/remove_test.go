@@ -24,7 +24,7 @@ func TestUnpairCredentialIsStableAndPeerSpecific(t *testing.T) {
 	}
 }
 
-func TestUnpairDeletesRecordAndIsRetryable(t *testing.T) {
+func TestUnpairDeletesRecordAndIsIdempotent(t *testing.T) {
 	a, client, key := fixture(t)
 	lease, err := a.Assign(context.Background(), peerPub(key), "phone")
 	if err != nil {
@@ -32,12 +32,11 @@ func TestUnpairDeletesRecordAndIsRetryable(t *testing.T) {
 	}
 	for i := 0; i < 2; i++ {
 		if err := a.Remove(context.Background(), peerPub(key), lease.UnpairToken); err != nil {
-			t.Fatal(err)
+			t.Fatalf("attempt %d: %v", i, err)
 		}
 	}
 	rows, _ := a.store.list(context.Background())
-	pending, _ := a.store.pending(context.Background())
-	if len(rows) != 0 || len(pending) != 0 || len(client.device.Peers) != 0 {
+	if len(rows) != 0 || len(client.device.Peers) != 0 {
 		t.Fatal("removal incomplete")
 	}
 	nextKey, err := wgtypes.GeneratePrivateKey()
@@ -50,20 +49,22 @@ func TestUnpairDeletesRecordAndIsRetryable(t *testing.T) {
 	}
 }
 
-func TestUnpairFailureAndRestartCompleteDeletion(t *testing.T) {
+func TestUnpairSucceedsWhenReconcileFailsAfterDBDelete(t *testing.T) {
 	a, client, key := fixture(t)
 	lease, err := a.Assign(context.Background(), peerPub(key), "phone")
 	if err != nil {
 		t.Fatal(err)
 	}
 	client.configureErr = errors.New("device failure")
-	if err := a.Remove(context.Background(), peerPub(key), lease.UnpairToken); err == nil {
-		t.Fatal("failure ignored")
+	if err := a.Remove(context.Background(), peerPub(key), lease.UnpairToken); err != nil {
+		t.Fatalf("DB-won remove must succeed even if reconcile fails: %v", err)
 	}
 	rows, _ := a.store.list(context.Background())
-	pending, _ := a.store.pending(context.Background())
-	if len(rows) != 0 || len(pending) != 1 {
-		t.Fatal("assignment not deleted or intent lost")
+	if len(rows) != 0 {
+		t.Fatal("DB should already have deleted the peer")
+	}
+	if len(client.device.Peers) != 1 {
+		t.Fatal("live peer should remain until reconcile succeeds")
 	}
 	a.store.db.Close()
 	store, err := openStore(a.Host.StorePath, client.device.PublicKey.String())
@@ -86,43 +87,82 @@ func TestWrongUnpairCredentialDoesNotMutate(t *testing.T) {
 	if err := a.Remove(context.Background(), peerPub(key), "wrong"); !errors.Is(err, pair.ErrUnauthorized) {
 		t.Fatal(err)
 	}
-	pending, _ := a.store.pending(context.Background())
-	if len(client.changes) != 0 || len(pending) != 0 {
+	if len(client.changes) != 0 {
 		t.Fatal("unauthorized mutation")
 	}
 }
 
-func TestUnpairNeverRemovesUnknownPeers(t *testing.T) {
+func TestUnpairRetryClearsLiveOrphanAfterDBWon(t *testing.T) {
 	a, client, key := fixture(t)
-	_, network, _ := net.ParseCIDR("10.8.0.2/32")
-	client.device.Peers = []wgtypes.Peer{{PublicKey: key.PublicKey(), AllowedIPs: []net.IPNet{*network}}}
-	credential, _ := unpairCredential(client.device.PrivateKey, key.PublicKey())
-	if err := a.Remove(context.Background(), peerPub(key), credential); err == nil {
-		t.Fatal("removed unmanaged peer")
+	lease, err := a.Assign(context.Background(), peerPub(key), "phone")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(client.changes) != 0 {
-		t.Fatal("unmanaged live state changed")
+	client.configureErr = errors.New("device failure")
+	if err := a.Remove(context.Background(), peerPub(key), lease.UnpairToken); err != nil {
+		t.Fatal(err)
+	}
+	if len(client.device.Peers) != 1 {
+		t.Fatal("expected live orphan after failed reconcile")
+	}
+	client.configureErr = nil
+	if err := a.Remove(context.Background(), peerPub(key), lease.UnpairToken); err != nil {
+		t.Fatal(err)
+	}
+	if len(client.device.Peers) != 0 {
+		t.Fatal("live orphan not cleared on retry")
 	}
 }
 
-func TestAdminRemoveRetryFinishesPendingByPublicKey(t *testing.T) {
+func TestUnpairOfNeverEnrolledKeyIsIdempotentSuccess(t *testing.T) {
+	a, client, key := fixture(t)
+	credential, _ := unpairCredential(client.device.PrivateKey, key.PublicKey())
+	if err := a.Remove(context.Background(), peerPub(key), credential); err != nil {
+		t.Fatal(err)
+	}
+	if len(client.changes) != 0 {
+		t.Fatal("absent peer mutated live state")
+	}
+}
+
+func TestAdminRemoveSucceedsWhenReconcileFailsAfterDBDelete(t *testing.T) {
 	a, client, key := fixture(t)
 	if _, err := a.Assign(context.Background(), peerPub(key), "Kitchen iPhone"); err != nil {
 		t.Fatal(err)
 	}
 	client.configureErr = errors.New("device failure")
-	if _, err := a.RemoveManaged(context.Background(), peerPub(key)); err == nil {
-		t.Fatal("expected live failure")
+	removed, err := a.RemoveManaged(context.Background(), peerPub(key))
+	if err != nil || removed != peerPub(key) {
+		t.Fatalf("DB-won admin remove must succeed: %q %v", removed, err)
 	}
 	if len(client.device.Peers) != 1 {
 		t.Fatal("peer should still be live after failed apply")
 	}
 	client.configureErr = nil
-	removed, err := a.RemoveManaged(context.Background(), peerPub(key))
+	removed, err = a.RemoveManaged(context.Background(), peerPub(key))
 	if err != nil || removed != peerPub(key) {
-		t.Fatalf("key retry: %q %v", removed, err)
+		t.Fatalf("orphan retry: %q %v", removed, err)
 	}
 	if len(client.device.Peers) != 0 {
-		t.Fatal("pending removal not applied on key retry")
+		t.Fatal("live orphan not cleared on key retry")
+	}
+}
+
+func TestAdminRemoveRejectsNeverEnrolledKey(t *testing.T) {
+	a, _, key := fixture(t)
+	if _, err := a.RemoveManaged(context.Background(), peerPub(key)); err == nil {
+		t.Fatal("never-enrolled admin remove accepted")
+	}
+}
+
+func TestReconcileClearsOrphanWithoutPendingJournal(t *testing.T) {
+	a, client, key := fixture(t)
+	_, network, _ := net.ParseCIDR("10.8.0.2/32")
+	client.device.Peers = []wgtypes.Peer{{PublicKey: key.PublicKey(), AllowedIPs: []net.IPNet{*network}}}
+	if err := a.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(client.device.Peers) != 0 {
+		t.Fatal("orphan live peer not removed")
 	}
 }

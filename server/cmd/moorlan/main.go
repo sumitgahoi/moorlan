@@ -36,18 +36,13 @@ func run() error {
 	fs.SetOutput(os.Stderr)
 	pairMode := fs.Bool("pair", false, "show pairing QR and accept enrollments")
 	unpair := fs.Bool("unpair", false, "show unpair QR and accept deletions")
-	removePeer := fs.String("remove-peer", "", "remove a managed peer by WireGuard public key and exit")
+	remove := fs.Bool("remove", false, "remove a managed peer by WireGuard public key and exit")
+	peerPublicKey := fs.String("peer-public-key", "", "peer WireGuard public key (with --remove)")
 	listPeers := fs.Bool("list-peers", false, "print enrolled peers (label, public key, address) and exit")
-	rehydrate := fs.Bool("rehydrate", false, "apply SQLite peers onto the live device and exit")
-	addIface := fs.String("add-interface", "", "add WireGuard iface: conf, DB, rehydrate unit")
-	removeIface := fs.String("remove-interface", "", "remove Moorlan conf, empty peer DB, and rehydrate unit; keep the host device")
-	wg := fs.String("wg", "wg0", "WireGuard interface (default wg0)")
-	db := fs.String("db", "", "SQLite path (default /var/lib/moorlan/<wg>.db)")
-	privateEndpoint := fs.String("private-endpoint", "", "override conf: LAN HTTP host:port")
-	homeCIDRs := fs.String("home-cidrs", "", "override conf: home IPv4 CIDR(s)")
-	publicEndpoint := fs.String("public-endpoint", "", "override conf: public WireGuard host:port")
-	dns := fs.String("dns", "", "override conf: home DNS IPv4 address(es)")
-	dnsSearch := fs.String("dns-search", "", "override conf: DNS search domain(s)")
+	reconcile := fs.Bool("reconcile", false, "apply SQLite peers onto the live device and exit")
+	addIface := fs.String("add-interface", "", "validate site conf; create DB + reconcile unit")
+	removeIface := fs.String("remove-interface", "", "remove Moorlan conf, empty peer DB, and reconcile unit; keep the host device")
+	iface := fs.String("interface", "", "WireGuard interface name")
 	fs.Usage = printUsage
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		if err == flag.ErrHelp {
@@ -55,21 +50,16 @@ func run() error {
 		}
 		return err
 	}
-	explicit := map[string]bool{}
-	fs.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
 
 	if os.Geteuid() != 0 {
 		return fmt.Errorf("must run as root (try: sudo moorlan)")
 	}
 
 	modes := 0
-	for _, on := range []bool{*pairMode, *unpair, *rehydrate, *listPeers} {
+	for _, on := range []bool{*pairMode, *unpair, *reconcile, *listPeers, *remove} {
 		if on {
 			modes++
 		}
-	}
-	if *removePeer != "" {
-		modes++
 	}
 	if *addIface != "" {
 		modes++
@@ -79,38 +69,47 @@ func run() error {
 	}
 	if modes == 0 {
 		printUsage()
-		return fmt.Errorf("specify --pair, --unpair, --remove-peer, --list-peers, --add-interface, --remove-interface, or --rehydrate")
+		return fmt.Errorf("specify --pair, --unpair, --remove, --list-peers, --add-interface, --remove-interface, or --reconcile")
 	}
 	if modes > 1 {
 		return fmt.Errorf("use only one primary mode")
 	}
+	if *peerPublicKey != "" && !*remove {
+		return fmt.Errorf("--peer-public-key is only valid with --remove")
+	}
+	if *remove && *peerPublicKey == "" {
+		return fmt.Errorf("--remove requires --peer-public-key <key>")
+	}
 
 	if *addIface != "" {
-		return runAddInterface(*addIface, *db, *privateEndpoint, *homeCIDRs, *publicEndpoint, *dns, *dnsSearch)
+		return runAddInterface(*addIface)
 	}
 	if *removeIface != "" {
 		return runRemoveInterface(*removeIface)
 	}
 
-	site, err := resolveSite(*wg, *db, *privateEndpoint, *homeCIDRs, *publicEndpoint, *dns, *dnsSearch, explicit)
+	if *iface == "" {
+		return fmt.Errorf("--interface <iface> is required")
+	}
+	if err := runtime.ValidateInterfaceName(*iface); err != nil {
+		return err
+	}
+
+	site, err := settings.Load(*iface)
 	if err != nil {
-		return err
+		return enrichIfaceError(*iface, err)
 	}
-	if err := runtime.ValidateInterfaceName(site.WG); err != nil {
-		return err
+	if site.DB == "" {
+		site.DB = runtime.DefaultStorePath(site.Interface)
 	}
-
-	if *pairMode || *unpair || *listPeers {
-		if !settings.Exists(site.WG) {
-			hint := fmt.Sprintf("sudo moorlan --add-interface %s", site.WG)
-			if names, err := settings.ListIfaceNames(); err == nil && len(names) > 0 {
-				hint = fmt.Sprintf("added interfaces: %s; pass -wg <name> or run --add-interface", strings.Join(names, ", "))
-			}
-			return fmt.Errorf("interface %s not added (%s)", site.WG, hint)
+	if _, err := os.Stat(site.DB); err != nil {
+		if os.IsNotExist(err) {
+			return enrichIfaceError(*iface, fmt.Errorf("interface %s not added (database %s missing; run: sudo moorlan --add-interface %s)", site.Interface, site.DB, site.Interface))
 		}
+		return err
 	}
 
-	release, err := runtime.LockInterface(site.WG)
+	release, err := runtime.LockInterface(site.Interface)
 	if err != nil {
 		return err
 	}
@@ -118,8 +117,8 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if *rehydrate || *removePeer != "" || *listPeers {
-		host, err := runtime.DiscoverDevice(site.WG, site.DB)
+	if *reconcile || *remove || *listPeers {
+		host, err := runtime.DiscoverDevice(site.Interface, site.DB)
 		if err != nil {
 			return err
 		}
@@ -131,14 +130,14 @@ func run() error {
 		if *listPeers {
 			return printPeers(ctx, assigner)
 		}
-		if err := assigner.Reconcile(ctx); err != nil {
-			return err
-		}
-		if *rehydrate {
-			fmt.Printf("rehydrated %s from %s\n", host.Snap.Name, host.StorePath)
+		if *reconcile {
+			if err := assigner.Reconcile(ctx); err != nil {
+				return err
+			}
+			fmt.Printf("reconciled %s from %s\n", host.Snap.Name, host.StorePath)
 			return nil
 		}
-		removed, err := assigner.RemoveManaged(ctx, *removePeer)
+		removed, err := assigner.RemoveManaged(ctx, *peerPublicKey)
 		if err != nil {
 			return err
 		}
@@ -152,9 +151,9 @@ func run() error {
 
 	var host runtime.Host
 	if *unpair {
-		host, err = runtime.DiscoverUnpair(site.WG, site.DB, site.PrivateEndpoint)
+		host, err = runtime.DiscoverUnpair(site.Interface, site.DB, site.PrivateEndpoint)
 	} else {
-		host, err = runtime.Discover(site.WG, site.DB, site.PrivateEndpoint, site.HomeCIDRs, site.PublicEndpoint, site.DNS, site.DNSSearch)
+		host, err = runtime.Discover(site.Interface, site.DB, site.PrivateEndpoint, site.HomeNetworks, site.PublicEndpoint, site.DNSServers, site.DNSSearch)
 	}
 	if err != nil {
 		return err
@@ -197,9 +196,12 @@ func run() error {
 		return fmt.Errorf("cannot listen on %s: %w", addr, err)
 	}
 	defer listener.Close()
-	fmt.Printf("interface  %s\ndatabase   %s\nprivate    %s\nhome CIDRs %s\n", host.Snap.Name, host.StorePath, addr, host.HomeCIDRLease())
-	if len(host.DNS) > 0 {
-		fmt.Printf("dns        %s\n", strings.Join(host.DNS, ","))
+	fmt.Printf("interface  %s\ndatabase   %s\nprivate    %s\n", host.Snap.Name, host.StorePath, addr)
+	if len(host.HomeNetworks) > 0 {
+		fmt.Printf("home       %s\n", strings.Join(host.HomeNetworks, ","))
+	}
+	if len(host.DNSServers) > 0 {
+		fmt.Printf("dns        %s\n", strings.Join(host.DNSServers, ","))
 	}
 	if len(host.DNSSearch) > 0 {
 		fmt.Printf("dns-search %s\n", strings.Join(host.DNSSearch, ","))
@@ -240,23 +242,37 @@ func run() error {
 	}
 }
 
+func enrichIfaceError(want string, err error) error {
+	names, listErr := settings.ListIfaceNames()
+	if listErr != nil || len(names) == 0 {
+		return err
+	}
+	var others []string
+	for _, name := range names {
+		if name != want {
+			others = append(others, name)
+		}
+	}
+	if len(others) == 0 {
+		return fmt.Errorf("%w (configured: %s)", err, strings.Join(names, ", "))
+	}
+	return fmt.Errorf("%w (other configured interfaces: %s)", err, strings.Join(others, ", "))
+}
+
 func printUsage() {
 	fmt.Fprint(os.Stderr, `Usage:
-  moorlan --add-interface <iface>     # new conf + DB + rehydrate unit (greenfield)
+  moorlan --add-interface <iface>     # validate /etc/moorlan/<iface>.conf; create DB + reconcile unit
   moorlan --remove-interface <iface>  # unit + conf + empty DB (refuses if peers remain)
-  moorlan --pair | --unpair | --remove-peer <pubkey> | --list-peers | --rehydrate
+  moorlan --pair --interface <iface>
+  moorlan --unpair --interface <iface>
+  moorlan --list-peers --interface <iface>
+  moorlan --remove --interface <iface> --peer-public-key <key>
+  moorlan --reconcile --interface <iface>
 
-Install the release binary to /usr/local/bin/moorlan (see server/README.md).
+Install the release binary to /usr/local/bin/moorlan and the example conf to
+/usr/share/moorlan/moorlan.conf.example (see server/README.md).
 Site conf /etc/moorlan/<iface>.conf is NOT your wg-quick/networkd device file.
-Peers live in SQLite. Default -wg is wg0 when only one name is needed.
-
-  -wg                  WireGuard interface (default wg0; auto-picks sole conf if present)
-  -db                  SQLite path override
-  -private-endpoint    LAN HTTP host:port (required for --add-interface / --pair)
-  -home-cidrs          home IPv4 CIDR(s) (required for --add-interface / --pair)
-  -public-endpoint     public WireGuard DDNS or static host:port (required for --add-interface / --pair)
-  -dns                 optional DNS IPv4 address(es): tunnel IP or inside home-cidrs
-  -dns-search          optional DNS search domain(s), e.g. home.arpa (requires -dns)
+Peers live in SQLite. Site settings come from the conf file only.
 `)
 }
 
@@ -281,64 +297,29 @@ func printPeers(ctx context.Context, assigner *runtime.Assigner) error {
 	return w.Flush()
 }
 
-func resolveSite(wg, db, privateEndpoint, homeCIDRs, publicEndpoint, dns, dnsSearch string, explicit map[string]bool) (settings.Site, error) {
-	iface := "wg0"
-	if explicit["wg"] {
-		iface = wg
-	} else if !settings.Exists(iface) {
-		names, err := settings.ListIfaceNames()
-		if err != nil {
-			return settings.Site{}, err
-		}
-		switch len(names) {
-		case 0:
-			// keep wg0; later modes report "not added"
-		case 1:
-			iface = names[0]
-		default:
-			return settings.Site{}, fmt.Errorf("multiple interfaces configured (%s); pass -wg <name>", strings.Join(names, ", "))
-		}
-	}
-	conf, err := settings.Load(iface)
-	if err != nil {
-		return settings.Site{}, err
-	}
-	flags := settings.Site{
-		WG:              wg,
-		DB:              db,
-		PrivateEndpoint: privateEndpoint,
-		HomeCIDRs:       homeCIDRs,
-		PublicEndpoint:  publicEndpoint,
-		DNS:             dns,
-		DNSSearch:       dnsSearch,
-	}
-	site := settings.Apply(conf, flags, explicit)
-	if !explicit["wg"] {
-		site.WG = iface
-	}
-	return site, nil
-}
-
 func requirePairSettings(site *settings.Site, unpairOnly bool) error {
 	if site.PrivateEndpoint == "" {
-		return fmt.Errorf("private-endpoint missing in %s", settings.Path(site.WG))
+		return fmt.Errorf("private-endpoint missing in %s", settings.Path(site.Interface))
 	}
 	if unpairOnly {
 		return nil
 	}
-	if site.HomeCIDRs == "" {
-		return fmt.Errorf("home-cidrs missing in %s", settings.Path(site.WG))
+	if site.HomeNetworks == "" {
+		return fmt.Errorf("home-networks missing in %s", settings.Path(site.Interface))
 	}
 	if site.PublicEndpoint == "" {
-		return fmt.Errorf("public-endpoint missing in %s (DDNS or static host:port)", settings.Path(site.WG))
+		return fmt.Errorf("public-endpoint missing in %s (DDNS or static host:port)", settings.Path(site.Interface))
 	}
 	if _, _, err := payload.SplitEndpoint(site.PublicEndpoint); err != nil {
-		return fmt.Errorf("public-endpoint in %s: %w", settings.Path(site.WG), err)
+		return fmt.Errorf("public-endpoint in %s: %w", settings.Path(site.Interface), err)
+	}
+	if site.DNSServers == "" {
+		return fmt.Errorf("dns-servers missing in %s", settings.Path(site.Interface))
 	}
 	return nil
 }
 
-func runAddInterface(iface, db, privateEndpoint, homeCIDRs, publicEndpoint, dns, dnsSearch string) error {
+func runAddInterface(iface string) error {
 	if err := runtime.ValidateInterfaceName(iface); err != nil {
 		return err
 	}
@@ -347,15 +328,18 @@ func runAddInterface(iface, db, privateEndpoint, homeCIDRs, publicEndpoint, dns,
 		return err
 	}
 
-	storePath := db
+	site, err := settings.Load(iface)
+	if err != nil {
+		release()
+		return err
+	}
+	storePath := site.DB
 	if storePath == "" {
 		storePath = runtime.DefaultStorePath(iface)
+		site.DB = storePath
 	}
 	unitPath := systemd.UnitPath(iface)
-	if settings.Exists(iface) {
-		release()
-		return fmt.Errorf("interface %s already added (%s); redo with: sudo moorlan --remove-interface %s", iface, settings.Path(iface), iface)
-	}
+
 	if _, err := os.Stat(storePath); err == nil {
 		release()
 		return fmt.Errorf("database %s already exists; remove peers then: sudo moorlan --remove-interface %s", storePath, iface)
@@ -365,51 +349,31 @@ func runAddInterface(iface, db, privateEndpoint, homeCIDRs, publicEndpoint, dns,
 	}
 	if _, err := os.Stat(unitPath); err == nil {
 		release()
-		return fmt.Errorf("rehydrate unit %s already exists; redo with: sudo moorlan --remove-interface %s", unitPath, iface)
+		return fmt.Errorf("reconcile unit %s already exists; redo with: sudo moorlan --remove-interface %s", unitPath, iface)
 	} else if !os.IsNotExist(err) {
 		release()
 		return err
 	}
 
-	site := settings.Site{WG: iface, DB: storePath, PrivateEndpoint: privateEndpoint, HomeCIDRs: homeCIDRs, PublicEndpoint: publicEndpoint, DNS: dns, DNSSearch: dnsSearch}
-	if site.PrivateEndpoint == "" || site.HomeCIDRs == "" || site.PublicEndpoint == "" {
+	if site.PrivateEndpoint == "" || site.HomeNetworks == "" || site.PublicEndpoint == "" || site.DNSServers == "" {
 		release()
-		return fmt.Errorf(`--add-interface requires flags (values are written to %s), for example:
-  sudo moorlan --add-interface %s \
-    -private-endpoint 10.10.10.1:8756 \
-    -home-cidrs 10.10.0.0/24,10.10.10.0/24 \
-    -public-endpoint vpn.example.com:51820
-  # optional: -dns 10.10.10.1 -dns-search home.arpa`, settings.Path(iface), iface)
+		return fmt.Errorf("site conf %s must set private-endpoint, home-networks, public-endpoint, and dns-servers (see %s)", settings.Path(iface), settings.ExamplePath)
 	}
 	if _, _, err := payload.SplitEndpoint(site.PublicEndpoint); err != nil {
 		release()
 		return fmt.Errorf("public-endpoint: %w", err)
 	}
 
-	host, err := runtime.Discover(iface, storePath, site.PrivateEndpoint, site.HomeCIDRs, site.PublicEndpoint, site.DNS, site.DNSSearch)
+	host, err := runtime.Discover(iface, storePath, site.PrivateEndpoint, site.HomeNetworks, site.PublicEndpoint, site.DNSServers, site.DNSSearch)
 	if err != nil {
 		release()
 		return fmt.Errorf("cannot add interface: %w", err)
 	}
 
+	// Partial failure rolls back DB and unit only — never the operator site conf.
 	rollback := func() {
 		_ = os.Remove(unitPath)
-		_ = os.Remove(settings.Path(iface))
 		_ = os.Remove(storePath)
-	}
-
-	if err := settings.Save(site); err != nil {
-		release()
-		return err
-	}
-	fmt.Printf("wrote %s (site flags only; not a wg-quick/networkd peer file)\n", settings.Path(iface))
-	fmt.Printf("  private-endpoint=%s\n  home-cidrs=%s\n  public-endpoint=%s\n",
-		site.PrivateEndpoint, site.HomeCIDRs, site.PublicEndpoint)
-	if site.DNS != "" {
-		fmt.Printf("  dns=%s\n", site.DNS)
-	}
-	if site.DNSSearch != "" {
-		fmt.Printf("  dns-search=%s\n", site.DNSSearch)
 	}
 
 	ctx := context.Background()
@@ -419,8 +383,9 @@ func runAddInterface(iface, db, privateEndpoint, homeCIDRs, publicEndpoint, dns,
 		return err
 	}
 	fmt.Printf("initialized %s\n", storePath)
+	fmt.Printf("using site conf %s (unchanged)\n", settings.Path(iface))
 
-	// Write the unit while locked, but release before enable --now so rehydrate can take the lock.
+	// Write the unit while locked, but release before enable --now so reconcile can take the lock.
 	if err := installUnit(iface); err != nil {
 		rollback()
 		release()
@@ -436,7 +401,7 @@ func runAddInterface(iface, db, privateEndpoint, homeCIDRs, publicEndpoint, dns,
 		return err
 	}
 	fmt.Printf("enabled %s\n", unitName)
-	fmt.Printf("next: sudo moorlan --pair -wg %s\n", iface)
+	fmt.Printf("next: sudo moorlan --pair --interface %s\n", iface)
 	return nil
 }
 
@@ -461,12 +426,12 @@ func runRemoveInterface(iface string) error {
 		}
 	}
 	if _, err := os.Stat(storePath); err == nil {
-		peers, pending, err := runtime.CountPeersAndPending(storePath)
+		peers, err := runtime.CountPeers(storePath)
 		if err != nil {
 			return err
 		}
-		if peers+pending > 0 {
-			return fmt.Errorf("refusing --remove-interface: database still has %d peer(s) and %d pending removal(s); unpair or --remove-peer first", peers, pending)
+		if peers > 0 {
+			return fmt.Errorf("refusing --remove-interface: database still has %d peer(s); unpair or --remove first", peers)
 		}
 	} else if !os.IsNotExist(err) {
 		return err
@@ -521,7 +486,7 @@ func lastUnitArg(args []string) string {
 	if len(args) > 0 {
 		return args[len(args)-1]
 	}
-	return "moorlan-rehydrate-*.service"
+	return "moorlan-reconcile-*.service"
 }
 
 func installUnit(iface string) error {

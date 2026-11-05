@@ -63,9 +63,21 @@ jobs:
             server/moorlan-${{ matrix.goos }}-${{ matrix.goarch }}.sha256
           if-no-files-found: error
 
+  example-conf:
+    name: Example conf
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: moorlan-conf-example
+          path: server/moorlan.conf.example
+          if-no-files-found: error
+
   release:
     name: GitHub Release
-    needs: build
+    needs: [build, example-conf]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
@@ -73,7 +85,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: dist
-          pattern: moorlan-linux-*
+          pattern: moorlan-*
           merge-multiple: true
       - name: Publish release
         # download-artifact writes to the workspace root; override the job-wide
@@ -83,9 +95,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           shopt -s nullglob
-          assets=(dist/moorlan-linux-*)
-          if [ ${#assets[@]} -eq 0 ]; then
-            echo "no release assets found" >&2
+          assets=(dist/moorlan-linux-* dist/moorlan.conf.example)
+          if [ ${#assets[@]} -lt 2 ]; then
+            echo "missing release assets" >&2
             ls -la dist >&2 || true
             exit 1
           fi

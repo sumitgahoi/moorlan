@@ -9,12 +9,13 @@ struct ScannerSheet: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var model = ScannerModel()
     @State private var phase: Phase = .camera
-    @State private var errorText: String?
+    @State private var facingError: UserFacingError?
     @State private var pendingUnpair: UnpairCard?
     @State private var unpairHostName = ""
     @State private var showUnpairConfirmation = false
-    @State private var progressText = "Pairing on the LAN…"
+    @State private var progressText = "Reaching server…"
     @State private var completionText = "Paired"
+    @State private var workTask: Task<Void, Never>?
 
     private enum Phase: Equatable {
         case camera
@@ -47,8 +48,11 @@ struct ScannerSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { dismiss() }
-                        .disabled(phase == .working)
+                    Button(phase == .working ? "Cancel" : "Close") {
+                        workTask?.cancel()
+                        workTask = nil
+                        dismiss()
+                    }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -60,23 +64,39 @@ struct ScannerSheet: View {
                     .accessibilityLabel(model.torchOn ? "Turn flashlight off" : "Turn flashlight on")
                 }
             }
-            .alert("Camera", isPresented: Binding(
-                get: { model.cameraError != nil && errorText == nil },
-                set: { if !$0 { model.clearCameraError() } }
-            )) {
-                Button("Open Settings") { openSettings() }
+            .alert(
+                model.cameraFacingError?.title ?? "Camera",
+                isPresented: Binding(
+                    get: { model.cameraFacingError != nil && facingError == nil },
+                    set: { if !$0 { model.clearCameraError() } }
+                )
+            ) {
+                if model.cameraFacingError?.action == .openSettings {
+                    Button("Open Settings") { openSettings() }
+                }
                 Button("Cancel", role: .cancel) { dismiss() }
             } message: {
-                Text(model.cameraError ?? "")
+                Text(model.cameraFacingError?.message ?? "")
             }
-            .alert("Moorlan", isPresented: Binding(
-                get: { errorText != nil },
-                set: { if !$0 { errorText = nil } }
-            )) {
-                Button("Open Settings") { openSettings() }
+            .alert(
+                facingError?.title ?? "Moorlan",
+                isPresented: Binding(
+                    get: { facingError != nil },
+                    set: { if !$0 { facingError = nil } }
+                )
+            ) {
+                if facingError?.action == .openSettings {
+                    Button("Open Settings") { openSettings() }
+                }
+                if facingError?.action == .retry {
+                    Button("Retry") {
+                        facingError = nil
+                        Task { await resumeScanning() }
+                    }
+                }
                 Button("OK", role: .cancel) {}
             } message: {
-                Text(errorText ?? "")
+                Text(facingError?.message ?? "")
             }
             .confirmationDialog("Unpair \(unpairHostName)?", isPresented: $showUnpairConfirmation, titleVisibility: .visible) {
                 Button("Unpair", role: .destructive) {
@@ -86,9 +106,8 @@ struct ScannerSheet: View {
                     Task { await resumeScanning() }
                 }
             } message: {
-                Text("Remove this device from the server and delete its local VPN configuration.")
+                Text("Remove this device from the server and delete only this host’s local VPN configuration. Other tunnels stay.")
             }
-            .interactiveDismissDisabled(phase == .working)
             .task {
                 await model.start()
             }
@@ -98,12 +117,15 @@ struct ScannerSheet: View {
                     Task { await model.start() }
                 }
             }
-            .onDisappear {
-                model.stop()
-            }
             .onChange(of: model.scannedPayload) { _, payload in
                 guard let payload else { return }
-                Task { await handle(payload) }
+                workTask?.cancel()
+                workTask = Task { await handle(payload) }
+            }
+            .onDisappear {
+                workTask?.cancel()
+                workTask = nil
+                model.stop()
             }
         }
     }
@@ -146,6 +168,7 @@ struct ScannerSheet: View {
         phase = .working
         progressText = "Reading QR…"
         do {
+            try Task.checkCancellation()
             switch try ScannedCode.parse(text) {
             case .unpair(let card):
                 let server = try card.pairedServer(in: tunnel.servers)
@@ -154,25 +177,39 @@ struct ScannerSheet: View {
                 phase = .confirming
                 showUnpairConfirmation = true
             case .pair(let card):
-                progressText = "Pairing on the LAN…"
+                progressText = "Reaching server…"
                 try await tunnel.pair(card: card)
+                try Task.checkCancellation()
                 await finish("Paired")
             }
+        } catch is CancellationError {
+            await resumeScanning()
+        } catch let urlError as URLError where urlError.code == .cancelled {
+            await resumeScanning()
         } catch {
-            errorText = error.localizedDescription
+            facingError = UserFacingError.map(error)
             await resumeScanning()
         }
     }
 
     private func performUnpair() async {
         guard let card = pendingUnpair else { return }
-        phase = .working
-        progressText = "Unpairing on the LAN…"
-        if await tunnel.unpair(scanned: card) {
-            await finish("Unpaired")
-        } else {
-            errorText = tunnel.lastError ?? "Could not unpair this host"
-            await resumeScanning()
+        workTask?.cancel()
+        workTask = Task {
+            phase = .working
+            progressText = "Unpairing…"
+            if await tunnel.unpair(scanned: card) {
+                await finish("Unpaired")
+            } else {
+                facingError = tunnel.presentedError
+                    ?? UserFacingError(
+                        title: "Could not unpair",
+                        message: "The host did not confirm removal. Local pairing was kept so you can retry.",
+                        action: .retry
+                    )
+                tunnel.clearPresentedError()
+                await resumeScanning()
+            }
         }
     }
 
@@ -199,7 +236,7 @@ final class ScannerModel: ObservableObject {
     @Published var scannedPayload: String?
     @Published var torchOn = false
     @Published var isRunning = false
-    @Published var cameraError: String?
+    @Published var cameraFacingError: UserFacingError?
 
     private let controller: CaptureController
 
@@ -218,7 +255,7 @@ final class ScannerModel: ObservableObject {
     }
 
     func clearCameraError() {
-        cameraError = nil
+        cameraFacingError = nil
     }
 
     func resetScan() {
@@ -226,7 +263,7 @@ final class ScannerModel: ObservableObject {
     }
 
     func start() async {
-        cameraError = nil
+        cameraFacingError = nil
 
         let status = AVCaptureDevice.authorizationStatus(for: .video)
         let granted: Bool
@@ -242,7 +279,11 @@ final class ScannerModel: ObservableObject {
         }
 
         guard granted else {
-            cameraError = "Camera access is required to scan the Moorlan QR. Enable it in Settings → Moorlan."
+            cameraFacingError = UserFacingError(
+                title: "Camera access needed",
+                message: "Moorlan needs the camera to scan pair and unpair QR codes. Enable Camera in Settings, then try again.",
+                action: .openSettings
+            )
             return
         }
 
@@ -251,7 +292,7 @@ final class ScannerModel: ObservableObject {
             isRunning = true
         } catch {
             isRunning = false
-            cameraError = error.localizedDescription
+            cameraFacingError = UserFacingError.mapScanner(error)
         }
     }
 
@@ -377,10 +418,12 @@ final class CaptureController: NSObject, AVCaptureMetadataOutputObjectsDelegate 
     }
 }
 
-private enum ScannerFailure: LocalizedError {
+private enum ScannerFailure: Error {
     case unavailable
     case qrUnsupported
+}
 
+extension ScannerFailure: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unavailable:
@@ -388,6 +431,29 @@ private enum ScannerFailure: LocalizedError {
         case .qrUnsupported:
             return "This camera cannot scan QR codes."
         }
+    }
+}
+
+// Map scanner failures into friendly UI errors without exposing AVFoundation strings.
+extension UserFacingError {
+    static func mapScanner(_ error: Error) -> UserFacingError {
+        if let failure = error as? ScannerFailure {
+            switch failure {
+            case .unavailable:
+                return UserFacingError(
+                    title: "Camera unavailable",
+                    message: "This device does not have a camera Moorlan can use for QR scanning.",
+                    action: .ok
+                )
+            case .qrUnsupported:
+                return UserFacingError(
+                    title: "QR not supported",
+                    message: "This camera cannot read QR codes. Try another device.",
+                    action: .ok
+                )
+            }
+        }
+        return map(error)
     }
 }
 

@@ -30,16 +30,13 @@ public struct PairingClient: Sendable {
             }
             throw MoorlanError.pairingFailed("HTTP \(http.statusCode)")
         }
-        let lease = try JSONDecoder().decode(Lease.self, from: data)
-        guard WireGuardKey.isValidPublicKey(lease.publicKey),
-              let endpoint = lease.endpoint, !endpoint.isEmpty,
-              let lan = lease.lan, !lan.isEmpty,
-              let credential = lease.unpairToken, !credential.isEmpty else {
-            throw MoorlanError.pairingFailed("Server did not return complete connection settings")
+        let lease: Lease
+        do {
+            lease = try JSONDecoder().decode(Lease.self, from: data)
+        } catch {
+            throw MoorlanError.leaseIncomplete
         }
-        guard lease.publicKey == card.serverPublicKey else {
-            throw MoorlanError.pairingFailed("Server identity does not match the scanned QR")
-        }
+        try Self.validateLease(lease, expectedServerKey: card.serverPublicKey)
         return lease
     }
 
@@ -73,10 +70,30 @@ public struct PairingClient: Sendable {
         guard let http = response as? HTTPURLResponse else {
             throw MoorlanError.unpairFailed("No HTTP response; local pairing kept")
         }
-        guard http.statusCode == 204 else {
-            let message = (try? JSONDecoder().decode(ErrorBody.self, from: data))?.error
-                ?? "HTTP \(http.statusCode)"
-            throw MoorlanError.unpairFailed(message)
+        // 204 = removed (or idempotent already-absent with valid token on current servers).
+        // 404/410 = peer already gone; phone should still clear local state.
+        if http.statusCode == 204 { return }
+        if http.statusCode == 404 || http.statusCode == 410 {
+            throw MoorlanError.unpairAlreadyGone
+        }
+        let message = (try? JSONDecoder().decode(ErrorBody.self, from: data))?.error
+            ?? "HTTP \(http.statusCode)"
+        throw MoorlanError.unpairFailed(message)
+    }
+
+    /// Lease contract: tunnel_network, home_networks, dns_servers (required), dns_search optional.
+    public static func validateLease(_ lease: Lease, expectedServerKey: String?) throws {
+        guard WireGuardKey.isValidPublicKey(lease.publicKey),
+              let endpoint = lease.endpoint, !endpoint.isEmpty,
+              !lease.address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !lease.tunnelNetwork.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              lease.homeNetworks.contains(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }),
+              lease.dnsServers.contains(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }),
+              let credential = lease.unpairToken, !credential.isEmpty else {
+            throw MoorlanError.leaseIncomplete
+        }
+        if let expectedServerKey, lease.publicKey != expectedServerKey {
+            throw MoorlanError.pairingFailed("Server identity does not match the scanned QR")
         }
     }
 }

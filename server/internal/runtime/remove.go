@@ -5,13 +5,20 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"log"
 	"strings"
 
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 	"moorlan/internal/pair"
 	"moorlan/internal/payload"
 )
+
+// errAlreadyAbsent means the peer was not in SQLite (and was not a live orphan
+// before this call). Admin --remove reports it; unpair with a valid token treats
+// it as idempotent success (lost-204 retries).
+var errAlreadyAbsent = errors.New("peer already absent")
 
 // A stable, per-peer capability survives restarts without a separate credential
 // database. It is domain-separated from WireGuard operations and never reveals
@@ -26,8 +33,10 @@ func unpairCredential(serverPrivate, peerPublic wgtypes.Key) (string, error) {
 	return hex.EncodeToString(mac.Sum(nil)), nil
 }
 
-// Remove deletes the assignment after checking the phone's HMAC credential.
-// The journal is cleared only after applying succeeds.
+// Remove deletes the peer from SQLite after checking the phone's HMAC credential,
+// then reconciles. Success means the peer is gone from SQLite (REQUIREMENTS:
+// DB already won; live MAY lag). Reconcile failure is logged, not returned.
+// A valid token against an already-absent peer is idempotent success (204).
 func (a *Assigner) Remove(ctx context.Context, publicKey, credential string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -55,18 +64,18 @@ func (a *Assigner) Remove(ctx context.Context, publicKey, credential string) err
 	if !hmac.Equal([]byte(expected), []byte(credential)) {
 		return pair.ErrUnauthorized
 	}
-	label := ""
-	if peer, err := a.store.lookupPublicKey(ctx, publicKey); err == nil {
-		label = peer.Label
-	} else if peer, err := a.store.lookupPendingKey(ctx, publicKey); err == nil {
-		label = peer.Label
+	err = a.removeManaged(ctx, client, publicKey)
+	if errors.Is(err, errAlreadyAbsent) {
+		return nil
 	}
-	return a.removeManaged(ctx, client, publicKey, label)
+	return err
 }
 
 // RemoveManaged deletes a peer by WireGuard public key only. Labels are admin
-// hints and may duplicate, so they are not accepted here. Retries resolve
-// pending removals when SQLite committed the deletion but live apply failed.
+// hints and may duplicate, so they are not accepted here. Success means the
+// peer is gone from SQLite; reconcile failure is logged (DB already won).
+// Retries after a DB-won remove (live orphan) succeed. A never-enrolled key
+// that is also absent live returns an error.
 func (a *Assigner) RemoveManaged(ctx context.Context, publicKey string) (string, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -82,67 +91,50 @@ func (a *Assigner) RemoveManaged(ctx context.Context, publicKey string) (string,
 		return "", err
 	}
 	publicKey = key.String()
-	peer, err := a.store.lookupPublicKey(ctx, publicKey)
-	if err != nil {
-		peer, err = a.store.lookupPendingKey(ctx, publicKey)
-		if err != nil {
-			return "", err
-		}
-	}
 	client, err := a.client()
 	if err != nil {
 		return "", err
 	}
 	defer client.Close()
-	if err := a.removeManaged(ctx, client, peer.PublicKey, peer.Label); err != nil {
+	if err := a.removeManaged(ctx, client, publicKey); err != nil {
+		if errors.Is(err, errAlreadyAbsent) {
+			return "", fmt.Errorf("no managed peer with public key %q", publicKey)
+		}
 		return "", err
 	}
-	return peer.PublicKey, nil
+	return publicKey, nil
 }
 
-func (a *Assigner) removeManaged(ctx context.Context, client wireguardClient, publicKey, label string) error {
+func (a *Assigner) removeManaged(ctx context.Context, client wireguardClient, publicKey string) error {
 	key, err := wgtypes.ParseKey(publicKey)
 	if err != nil {
 		return err
 	}
 	publicKey = key.String()
-	device, err := client.Device(a.Host.Snap.Name)
-	if err != nil {
-		return err
-	}
-	peers, err := a.store.list(ctx)
-	if err != nil {
-		return err
-	}
-	pending, err := a.store.pending(ctx)
-	if err != nil {
-		return err
-	}
-	known := peerKeys(peers)[publicKey]
-	for _, p := range pending {
-		if p == publicKey {
-			known = true
-		}
-	}
-	if !known {
+
+	liveBefore := false
+	if device, err := client.Device(a.Host.Snap.Name); err == nil {
 		for _, p := range device.Peers {
 			if p.PublicKey == key {
-				return fmt.Errorf("cannot unpair an unmanaged live peer")
-			}
-		}
-		// Already removed; retries are no-ops.
-		return a.reconcile(ctx, client)
-	}
-	if label == "" {
-		for _, p := range peers {
-			if p.PublicKey == publicKey {
-				label = p.Label
+				liveBefore = true
 				break
 			}
 		}
 	}
-	if err = a.store.remove(ctx, publicKey, label); err != nil {
+
+	deleted, err := a.store.delete(ctx, publicKey)
+	if err != nil {
 		return err
 	}
-	return a.reconcile(ctx, client)
+
+	// Always attempt reconcile so live catches up. Failure must not flip a
+	// DB-won remove into an API failure — next reconcile or boot clears orphans.
+	if err := a.reconcile(ctx, client); err != nil {
+		log.Printf("moorlan: reconcile after removing peer %s: %v (database already updated; next reconcile will retry)", publicKey, err)
+	}
+
+	if deleted || liveBefore {
+		return nil
+	}
+	return errAlreadyAbsent
 }

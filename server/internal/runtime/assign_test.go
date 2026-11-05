@@ -63,12 +63,12 @@ func fixture(t *testing.T) (*Assigner, *fakeWG, wgtypes.Key) {
 	t.Cleanup(func() { store.db.Close() })
 	a := &Assigner{
 		Host: Host{
-			StorePath: dbPath,
-			Snap:      iface.Snapshot{Name: "moorlan0", PublicKey: fake.device.PublicKey.String(), Addresses: []string{"10.8.0.1/24"}, MTU: 1420},
-			HomeCIDRs: []string{"192.168.1.0/24"},
-			DNS:       []string{"192.168.1.1"},
-			DNSSearch: []string{"home.arpa"},
-			Endpoint:  "vpn.example:51823",
+			StorePath:    dbPath,
+			Snap:         iface.Snapshot{Name: "moorlan0", PublicKey: fake.device.PublicKey.String(), Addresses: []string{"10.8.0.1/24"}, MTU: 1420},
+			HomeNetworks: []string{"192.168.1.0/24"},
+			DNSServers:   []string{"192.168.1.1", "1.1.1.1"},
+			DNSSearch:    []string{"home.arpa"},
+			Endpoint:     "vpn.example:51823",
 		},
 		store:      store,
 		openClient: func() (wireguardClient, error) { return fake, nil },
@@ -92,11 +92,14 @@ func TestAssignPersistsAndRetriesWithoutChangingLivePeer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.Address != second.Address || first.UnpairToken != second.UnpairToken || first.Prefixes[0] != "10.8.0.0/24" {
+	if first.Address != second.Address || first.UnpairToken != second.UnpairToken || first.TunnelNetwork != "10.8.0.0/24" {
 		t.Fatalf("%+v %+v", first, second)
 	}
-	if len(first.DNS) != 1 || first.DNS[0] != "192.168.1.1" {
-		t.Fatalf("dns: %+v", first.DNS)
+	if len(first.HomeNetworks) != 1 || first.HomeNetworks[0] != "192.168.1.0/24" {
+		t.Fatalf("home_networks: %+v", first.HomeNetworks)
+	}
+	if len(first.DNSServers) != 2 || first.DNSServers[0] != "192.168.1.1" || first.DNSServers[1] != "1.1.1.1" {
+		t.Fatalf("dns_servers: %+v", first.DNSServers)
 	}
 	if len(first.DNSSearch) != 1 || first.DNSSearch[0] != "home.arpa" {
 		t.Fatalf("dns_search: %+v", first.DNSSearch)
@@ -187,7 +190,28 @@ func TestApplyFailureKeepsStableAssignment(t *testing.T) {
 	}
 }
 
-func TestRehydrateRestoresMissingLivePeers(t *testing.T) {
+func TestReconcileRejectsCorruptPeerRows(t *testing.T) {
+	a, _, _ := fixture(t)
+	ctx := context.Background()
+	if err := a.store.insert(ctx, "not-a-key", "10.8.0.2/32", "bad"); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Reconcile(ctx); err == nil {
+		t.Fatal("corrupt public key accepted")
+	}
+	key := wgtypes.Key{9}.String()
+	if _, err := a.store.db.ExecContext(ctx, "DELETE FROM peers"); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.store.insert(ctx, key, "not-a-cidr", "bad"); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Reconcile(ctx); err == nil {
+		t.Fatal("corrupt address accepted")
+	}
+}
+
+func TestReconcileRestoresMissingLivePeers(t *testing.T) {
 	a, client, key := fixture(t)
 	if _, err := a.Assign(context.Background(), peerPub(key), "phone"); err != nil {
 		t.Fatal(err)
@@ -198,11 +222,11 @@ func TestRehydrateRestoresMissingLivePeers(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(client.device.Peers) != 1 {
-		t.Fatal("rehydrate incomplete")
+		t.Fatal("reconcile incomplete")
 	}
 }
 
-func TestRehydrateRemovesOrphanLivePeers(t *testing.T) {
+func TestReconcileRemovesOrphanLivePeers(t *testing.T) {
 	a, client, key := fixture(t)
 	if _, err := a.Assign(context.Background(), peerPub(key), "phone"); err != nil {
 		t.Fatal(err)
@@ -307,9 +331,6 @@ func TestAllocationReservesLiveAndUnfinishedAssignments(t *testing.T) {
 	}
 	lease, err := a.Assign(context.Background(), peerPub(key), "phone")
 	if err != nil || lease.Address != "10.8.0.2/32" {
-		// .2 free, .3 live orphan reserved, .4 unfinished in DB; but reconcile removes orphan live!
-		// Order: insert new peer, then reconcile which removes orphan `live` and installs unfinished+new.
-		// Occupied at alloc time includes live .3 and unfinished .4, so new gets .2.
 		t.Fatalf("%+v %v", lease, err)
 	}
 	found := map[wgtypes.Key]bool{}

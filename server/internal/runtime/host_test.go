@@ -2,38 +2,37 @@ package runtime
 
 import (
 	"net"
-	"strings"
 	"testing"
 
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
-func TestParseHomeCIDRs(t *testing.T) {
-	got, err := parseHomeCIDRs("10.10.0.0/16")
+func TestParseHomeNetworks(t *testing.T) {
+	got, err := parseHomeNetworks("10.10.0.0/16")
 	if err != nil || len(got) != 1 || got[0] != "10.10.0.0/16" {
 		t.Fatalf("%v %v", got, err)
 	}
-	got, err = parseHomeCIDRs("10.10.10.0/24, 10.10.20.0/24,10.10.10.0/24")
+	got, err = parseHomeNetworks("10.10.10.0/24, 10.10.20.0/24,10.10.10.0/24")
 	if err != nil || len(got) != 2 || got[0] != "10.10.10.0/24" || got[1] != "10.10.20.0/24" {
 		t.Fatalf("dedupe/split: %v %v", got, err)
 	}
-	if _, err := parseHomeCIDRs(""); err == nil {
-		t.Fatal("empty home CIDRs accepted")
+	if _, err := parseHomeNetworks(""); err == nil {
+		t.Fatal("empty home-networks accepted")
 	}
-	if _, err := parseHomeCIDRs("203.0.113.0/24"); err == nil {
-		t.Fatal("public home CIDR accepted")
+	if _, err := parseHomeNetworks("203.0.113.0/24"); err == nil {
+		t.Fatal("public home-networks accepted")
 	}
-	if _, err := parseHomeCIDRs("192.168.0.0/15"); err == nil {
+	if _, err := parseHomeNetworks("192.168.0.0/15"); err == nil {
 		t.Fatal("prefix that spills into public space accepted")
 	}
-	if _, err := parseHomeCIDRs("10.0.0.0/7"); err == nil {
+	if _, err := parseHomeNetworks("10.0.0.0/7"); err == nil {
 		t.Fatal("prefix wider than 10.0.0.0/8 accepted")
 	}
-	if _, err := parseHomeCIDRs("172.16.0.0/11"); err == nil {
+	if _, err := parseHomeNetworks("172.16.0.0/11"); err == nil {
 		t.Fatal("prefix wider than 172.16.0.0/12 accepted")
 	}
-	if _, err := parseHomeCIDRs("not-a-cidr"); err == nil {
-		t.Fatal("garbage home CIDR accepted")
+	if _, err := parseHomeNetworks("not-a-cidr"); err == nil {
+		t.Fatal("garbage home-networks accepted")
 	}
 }
 
@@ -42,7 +41,7 @@ func TestResolvePrivateEndpointValidation(t *testing.T) {
 		t.Fatal("missing private-endpoint accepted")
 	}
 	if _, _, err := resolvePrivateEndpoint("wg0", "", nil); err == nil {
-		t.Fatal("missing private-endpoint accepted without home CIDRs")
+		t.Fatal("missing private-endpoint accepted without home-networks")
 	}
 	if _, _, err := resolvePrivateEndpoint("wg0", "10.10.10.1", []string{"10.10.0.0/16"}); err == nil {
 		t.Fatal("private-endpoint without port accepted")
@@ -52,45 +51,49 @@ func TestResolvePrivateEndpointValidation(t *testing.T) {
 	}
 }
 
-func TestValidateHomeCIDRsRejectsTunnelOverlap(t *testing.T) {
+func TestValidateHomeNetworksRejectsTunnelOverlap(t *testing.T) {
 	_, tunnel, _ := net.ParseCIDR("10.8.0.0/24")
-	if err := validateHomeCIDRs([]string{"10.8.0.0/24"}, tunnel); err == nil {
+	if err := validateHomeNetworks([]string{"10.8.0.0/24"}, tunnel); err == nil {
 		t.Fatal("CIDR overlaps tunnel")
 	}
-	if err := validateHomeCIDRs([]string{"203.0.113.0/24"}, nil); err == nil {
-		t.Fatal("public network accepted as home CIDR")
+	if err := validateHomeNetworks([]string{"203.0.113.0/24"}, nil); err == nil {
+		t.Fatal("public network accepted as home-networks")
 	}
-	if err := validateHomeCIDRs([]string{"192.168.0.0/15"}, nil); err == nil {
+	if err := validateHomeNetworks([]string{"192.168.0.0/15"}, nil); err == nil {
 		t.Fatal("prefix that spills into public space accepted")
 	}
-	if err := validateHomeCIDRs([]string{"192.168.1.0/24", "10.10.0.0/16"}, tunnel); err != nil {
+	if err := validateHomeNetworks([]string{"192.168.1.0/24", "10.10.0.0/16"}, tunnel); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestParseDNSServers(t *testing.T) {
-	home := []string{"10.10.10.0/24", "10.10.20.0/24"}
-	tunnel := net.ParseIP("10.8.0.1").To4()
-	got, err := parseDNSServers("", home, tunnel)
-	if err != nil || got != nil {
-		t.Fatalf("empty dns should omit: %v %v", got, err)
+	got, err := parseDNSServers("")
+	if err == nil || got != nil {
+		t.Fatalf("empty dns-servers should fail: %v %v", got, err)
 	}
-	got, err = parseDNSServers("10.10.10.1, 10.10.20.53,10.10.10.1", home, tunnel)
+	got, err = parseDNSServers("10.10.10.1, 1.1.1.1,10.10.10.1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 2 || got[0] != "10.10.10.1" || got[1] != "10.10.20.53" {
+	if len(got) != 2 || got[0] != "10.10.10.1" || got[1] != "1.1.1.1" {
 		t.Fatalf("%v", got)
 	}
-	got, err = parseDNSServers("10.8.0.1", home, tunnel)
-	if err != nil || len(got) != 1 || got[0] != "10.8.0.1" {
-		t.Fatalf("explicit tunnel dns: %v %v", got, err)
+	got, err = parseDNSServers("8.8.8.8")
+	if err != nil || len(got) != 1 || got[0] != "8.8.8.8" {
+		t.Fatalf("public dns: %v %v", got, err)
 	}
-	if _, err := parseDNSServers("1.1.1.1", home, tunnel); err == nil {
-		t.Fatal("public dns accepted")
+	if _, err := parseDNSServers("127.0.0.1"); err == nil {
+		t.Fatal("loopback dns accepted")
 	}
-	if _, err := parseDNSServers("10.10.30.1", home, tunnel); err == nil {
-		t.Fatal("dns outside home-cidrs accepted")
+	if _, err := parseDNSServers("0.0.0.0"); err == nil {
+		t.Fatal("unspecified dns accepted")
+	}
+	if _, err := parseDNSServers("224.0.0.1"); err == nil {
+		t.Fatal("multicast dns accepted")
+	}
+	if _, err := parseDNSServers("not-an-ip"); err == nil {
+		t.Fatal("garbage dns accepted")
 	}
 }
 
@@ -104,17 +107,6 @@ func TestParseDNSSearch(t *testing.T) {
 	}
 	if _, err := parseDNSSearch("-bad.arpa"); err == nil {
 		t.Fatal("invalid search domain accepted")
-	}
-}
-
-func TestHostLeaseHelpers(t *testing.T) {
-	h := Host{HomeCIDRs: []string{"10.10.10.0/24", "10.10.20.0/24"}}
-	if got := h.HomeCIDRLease(); got != "10.10.10.0/24,10.10.20.0/24" {
-		t.Fatal(got)
-	}
-	got := h.RoutePrefixes("10.8.0.0/24")
-	if strings.Join(got, ",") != "10.8.0.0/24,10.10.10.0/24,10.10.20.0/24" {
-		t.Fatal(got)
 	}
 }
 

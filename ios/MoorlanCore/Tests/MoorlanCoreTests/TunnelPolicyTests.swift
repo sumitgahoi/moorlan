@@ -2,25 +2,55 @@ import XCTest
 @testable import MoorlanCore
 
 final class TunnelPolicyTests: XCTestCase {
+    private func sampleLease(
+        tunnelNetwork: String = "10.8.0.0/24",
+        homeNetworks: [String] = ["192.168.1.0/24"],
+        dnsServers: [String] = ["192.168.1.1"],
+        unpairToken: String? = "peer-secret"
+    ) -> Lease {
+        Lease(
+            address: "10.8.0.2/32",
+            tunnelNetwork: tunnelNetwork,
+            homeNetworks: homeNetworks,
+            publicKey: "key",
+            endpoint: "example:51820",
+            dnsServers: dnsServers,
+            unpairToken: unpairToken
+        )
+    }
+
     func testAutomaticNetworkDefaults() {
         let policy = TunnelPolicy(trustedNetworkIDs: ["ssid:Office"])
         XCTAssertEqual(policy.decide(path: .wifi(id: "ssid:Cafe")), .connect(fullTunnel: true))
-        XCTAssertEqual(policy.decide(path: .wifi(id: "unidentified")), .connect(fullTunnel: true))
         XCTAssertEqual(policy.decide(path: .wifi(id: "ssid:Office")), .connect(fullTunnel: false))
         XCTAssertEqual(policy.decide(path: .cellular), .connect(fullTunnel: false))
         XCTAssertEqual(policy.decide(path: .other), .connect(fullTunnel: true))
     }
-    func testUnknownNetworkCannotBecomeTrustedByInterfaceName() {
+
+    func testUnknownSSIDFailsClosedNeverExit() {
         let policy = TunnelPolicy(trustedNetworkIDs: ["unidentified", "wifi:en0"])
-        XCTAssertEqual(policy.decide(path: .wifi(id: "unidentified")), .connect(fullTunnel: true))
-        XCTAssertEqual(policy.decide(path: .wifi(id: "wifi:en0")), .connect(fullTunnel: true))
+        // Even with those IDs in the trusted set, unidentified / interface fingerprints disconnect.
+        XCTAssertEqual(
+            policy.decide(path: .wifi(id: "unidentified")),
+            .disconnect(reason: "Wi‑Fi name unavailable")
+        )
+        XCTAssertEqual(
+            policy.decide(path: .wifi(id: "wifi:en0")),
+            .disconnect(reason: "Wi‑Fi name unavailable")
+        )
+        // Manual exit must not hairpin when SSID is unknown.
+        XCTAssertEqual(
+            TunnelPolicy(mode: .exit).decide(path: .wifi(id: "unidentified")),
+            .disconnect(reason: "Wi‑Fi name unavailable")
+        )
     }
-    func testHomeWiFiAlwaysDisconnects() {
+
+    func testHomeWiFiAlwaysDisconnectsEvenOverManualExit() {
         let home: Set<String> = ["ssid:House"]
         for mode in TunnelPolicy.Mode.allCases {
             XCTAssertEqual(
                 TunnelPolicy(mode: mode).decide(path: .wifi(id: "ssid:House"), homeSSIDs: home),
-                .disconnect(reason: "Tunnel stays off on home Wi‑Fi")
+                .disconnect(reason: "Off at home")
             )
         }
         XCTAssertEqual(
@@ -28,31 +58,52 @@ final class TunnelPolicyTests: XCTestCase {
             .connect(fullTunnel: true)
         )
     }
-    func testExplicitRoutingToggleIsHonored() {
+
+    func testHomeIsNotTrusted() {
+        let home: Set<String> = ["ssid:House"]
+        let policy = TunnelPolicy(trustedNetworkIDs: ["ssid:House"])
+        // Home SSIDs win; Trusted membership must not subnet-route on the home LAN.
+        XCTAssertEqual(
+            policy.decide(path: .wifi(id: "ssid:House"), homeSSIDs: home),
+            .disconnect(reason: "Off at home")
+        )
+    }
+
+    func testExplicitRoutingToggleIsHonoredExceptHome() {
         for path in [TunnelPolicy.PathKind.cellular, .wifi(id: "ssid:Cafe"), .other] {
             XCTAssertEqual(TunnelPolicy(mode: .split).decide(path: path), .connect(fullTunnel: false))
             XCTAssertEqual(TunnelPolicy(mode: .exit).decide(path: path), .connect(fullTunnel: true))
         }
         XCTAssertEqual(TunnelPolicy(treatCellularAsTrusted: false).decide(path: .cellular), .connect(fullTunnel: true))
     }
-    func testSplitIncludesLANAndExcludesDefaultRoutes() {
-        let lease = Lease(address: "10.8.0.2/32", prefixes: ["10.8.0.0/24", "0.0.0.0/0", "::/0"], publicKey: "key", lan: "192.168.1.0/24")
-        let policy = TunnelPolicy()
-        XCTAssertEqual(policy.allowedIPs(lease: lease, fullTunnel: false), ["10.8.0.0/24", "192.168.1.0/24"])
-        XCTAssertEqual(Set(policy.allowedIPs(lease: lease, fullTunnel: true)), Set(["10.8.0.0/24", "192.168.1.0/24", "0.0.0.0/0", "::/0"]))
-    }
-    func testHomeCIDRListAcceptsCommaSeparated() {
-        XCTAssertEqual(TunnelPolicy.homeCIDRs(from: "10.10.0.0/16"), ["10.10.0.0/16"])
-        XCTAssertEqual(
-            TunnelPolicy.homeCIDRs(from: "10.10.10.0/24, 10.10.20.0/24"),
-            ["10.10.10.0/24", "10.10.20.0/24"]
+
+    func testAllowedIPsUseTunnelNetworkAndHomeNetworks() {
+        let lease = sampleLease(
+            tunnelNetwork: "10.8.0.0/24",
+            homeNetworks: ["192.168.1.0/24", "10.10.10.0/24"]
         )
-        let lease = Lease(address: "10.8.0.2/32", prefixes: ["10.8.0.0/24"], publicKey: "key", lan: "10.10.10.0/24,10.10.20.0/24")
+        let policy = TunnelPolicy()
+        XCTAssertEqual(
+            policy.allowedIPs(lease: lease, fullTunnel: false),
+            ["10.10.10.0/24", "10.8.0.0/24", "192.168.1.0/24"]
+        )
+        XCTAssertEqual(
+            Set(policy.allowedIPs(lease: lease, fullTunnel: true)),
+            Set(["10.8.0.0/24", "192.168.1.0/24", "10.10.10.0/24", "0.0.0.0/0", "::/0"])
+        )
+    }
+
+    func testAllowedIPsIgnoreEmbeddedDefaultRoutesInLeaseFields() {
+        let lease = sampleLease(
+            tunnelNetwork: "0.0.0.0/0",
+            homeNetworks: ["::/0", "192.168.1.0/24"]
+        )
         XCTAssertEqual(
             TunnelPolicy().allowedIPs(lease: lease, fullTunnel: false),
-            ["10.10.10.0/24", "10.10.20.0/24", "10.8.0.0/24"]
+            ["192.168.1.0/24"]
         )
     }
+
     func testLegacyTrustDoesNotTrustEveryWiFiInterface() throws {
         let name = "moorlan-test-" + UUID().uuidString
         let defaults = UserDefaults(suiteName: name)!
@@ -64,69 +115,67 @@ final class TunnelPolicyTests: XCTestCase {
         let policy = store.loadPolicy()
         XCTAssertEqual(policy.mode, .automatic)
         XCTAssertEqual(policy.trustedNetworkIDs, ["ssid:Office"])
-        store.savePolicy(TunnelPolicy(mode: .split))
+        try store.savePolicy(TunnelPolicy(mode: .split))
         XCTAssertEqual(store.loadPolicy().mode, .split)
     }
-    func testExtensionProfileDoesNotContainPrivateOrDeletionCredential() throws {
+
+    func testCorruptServerStoreThrowsInsteadOfEmpty() throws {
+        let name = "moorlan-test-" + UUID().uuidString
+        let defaults = UserDefaults(suiteName: name)!
+        defer { defaults.removePersistentDomain(forName: name) }
+        defaults.set(Data("not-json".utf8), forKey: "paired-servers")
+        let store = ServerStore(defaults: defaults)
+        XCTAssertThrowsError(try store.loadServers()) { error in
+            XCTAssertEqual(error as? MoorlanError, .storageFailed)
+        }
+    }
+
+    func testExtensionProfileStripsUnpairTokenAndOmitsPrivateKey() throws {
         let server = PairedServer(
-            card: QRCard(pairURL: URL(string: "http://192.168.1.10/v1/pair")!, token: String(repeating: "a", count: 32)),
-            lease: Lease(address: "10.8.0.2/32", prefixes: [], publicKey: "server", endpoint: "example:51820", lan: "192.168.1.0/24", unpairToken: "deletion-secret"),
+            card: QRCard(pairURL: URL(string: "http://192.168.1.10/v1/pair")!, serverPublicKey: "server"),
+            lease: sampleLease(unpairToken: "deletion-secret"),
             homeSSIDs: ["ssid:House"]
         )
         let profile = TunnelProfile(server: server, policy: TunnelPolicy())
+        XCTAssertNil(profile.lease.unpairToken)
         let data = try JSONEncoder().encode(profile)
         let text = String(decoding: data, as: UTF8.self)
         XCTAssertFalse(text.contains("deletion-secret"))
+        XCTAssertFalse(text.contains("unpair_token"))
         XCTAssertFalse(text.contains("private"))
-        XCTAssertEqual(try JSONDecoder().decode(TunnelProfile.self, from: data), profile)
-        XCTAssertEqual(profile.homeSSIDs, ["ssid:House"])
+        let decoded = try JSONDecoder().decode(TunnelProfile.self, from: data)
+        XCTAssertNil(decoded.lease.unpairToken)
+        XCTAssertEqual(decoded.homeSSIDs, ["ssid:House"])
+        XCTAssertEqual(decoded.lease.dnsServers, ["192.168.1.1"])
+        XCTAssertEqual(decoded.lease.tunnelNetwork, "10.8.0.0/24")
+        XCTAssertEqual(decoded.lease.homeNetworks, ["192.168.1.0/24"])
     }
 
-    func testClientOverridesBakeIntoTunnelProfileWithoutChangingStoredLease() throws {
-        var server = PairedServer(
+    func testPairedServerDoesNotPersistClientDNSOverrides() throws {
+        let server = PairedServer(
             card: QRCard(pairURL: URL(string: "http://192.168.1.10/v1/pair")!, serverPublicKey: "server"),
-            lease: Lease(
-                address: "10.8.0.2/32",
-                prefixes: ["10.8.0.0/24"],
-                publicKey: "server",
-                endpoint: "example:51820",
-                mtu: 1420,
-                lan: "192.168.1.0/24",
-                dns: ["192.168.1.1"],
-                persistentKeepalive: 25
-            )
+            lease: sampleLease(dnsServers: ["192.168.1.1"])
         )
-        server.client = ClientTunnelSettings(dns: ["10.10.10.10"], dnsSearch: ["home.arpa"], mtu: 1380, persistentKeepalive: 30)
-        let profile = TunnelProfile(server: server, policy: TunnelPolicy())
-        XCTAssertEqual(profile.lease.dns, ["10.10.10.10"])
-        XCTAssertEqual(profile.lease.dnsSearch, ["home.arpa"])
-        XCTAssertEqual(profile.lease.mtu, 1380)
-        XCTAssertEqual(profile.lease.persistentKeepalive, 30)
-        XCTAssertEqual(server.lease.dns, ["192.168.1.1"])
-        XCTAssertEqual(server.lease.mtu, 1420)
-        XCTAssertEqual(server.lease.persistentKeepalive, 25)
-
         let encoded = try JSONEncoder().encode(server)
+        let text = String(decoding: encoded, as: UTF8.self)
+        XCTAssertFalse(text.contains("\"client\""))
         let decoded = try JSONDecoder().decode(PairedServer.self, from: encoded)
-        XCTAssertEqual(decoded.client.dns, ["10.10.10.10"])
-        XCTAssertEqual(decoded.client.dnsSearch, ["home.arpa"])
-        XCTAssertEqual(decoded.lease.dns, ["192.168.1.1"])
+        XCTAssertEqual(decoded.lease.dnsServers, ["192.168.1.1"])
     }
 
-    func testClientDNSParsing() throws {
-        XCTAssertNil(try ClientTunnelSettings.parseDNS("").get())
-        XCTAssertEqual(try ClientTunnelSettings.parseDNS(" 10.10.10.10, 10.10.10.11 ").get(), ["10.10.10.10", "10.10.10.11"])
-        if case .failure = ClientTunnelSettings.parseDNS("not-an-ip") {} else {
-            XCTFail("expected invalid DNS failure")
-        }
-        XCTAssertEqual(try ClientTunnelSettings.parseDNSSearch(" home.arpa, LAN. ").get(), ["home.arpa", "lan"])
-        if case .failure = ClientTunnelSettings.parseDNSSearch("-bad") {} else {
-            XCTFail("expected invalid search domain failure")
-        }
-    }
-    func testIPv4ParsingAndNetworkBoundaries() {
-        XCTAssertNil(IPv4Address("192.168.bad.1.2"))
-        XCTAssertTrue(IPv4Network("192.168.1.0/24")!.contains(IPv4Address("192.168.1.10")!))
-        XCTAssertFalse(IPv4Network("192.168.1.0/24")!.contains(IPv4Address("10.8.0.2")!))
+    func testUserFacingErrorsNeverSurfaceRawNEOrURLStrings() {
+        let stopped = UserFacingError.map(MoorlanError.tunnelStopped)
+        XCTAssertEqual(stopped.title, "Tunnel stopped")
+        XCTAssertEqual(stopped.action, .retry)
+        XCTAssertFalse(stopped.message.lowercased().contains("nevpn"))
+
+        let url = UserFacingError.map(URLError(.timedOut))
+        XCTAssertFalse(url.message.lowercased().contains("nsurlerror"))
+        XCTAssertFalse(url.message.contains("NSURLError"))
+
+        let ne = NSError(domain: "NEVPNErrorDomain", code: 1)
+        let mapped = UserFacingError.map(ne)
+        XCTAssertFalse(mapped.message.contains("NEVPNErrorDomain"))
+        XCTAssertEqual(mapped.action, .openSettings)
     }
 }

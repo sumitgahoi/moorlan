@@ -1,4 +1,4 @@
-// Package settings loads and saves per-interface site settings under /etc/moorlan.
+// Package settings loads per-interface site settings under /etc/moorlan.
 // The file holds only static host parameters (not peers or device keys).
 package settings
 
@@ -14,14 +14,17 @@ import (
 // Dir is the directory for per-interface site conf files. Tests may override it.
 var Dir = "/etc/moorlan"
 
+// ExamplePath is where the packaged example conf is installed.
+const ExamplePath = "/usr/share/moorlan/moorlan.conf.example"
+
 // Site is the static configuration for one WireGuard interface.
 type Site struct {
-	WG              string
+	Interface       string
 	DB              string
 	PrivateEndpoint string
-	HomeCIDRs       string
+	HomeNetworks    string
 	PublicEndpoint  string
-	DNS             string
+	DNSServers      string
 	DNSSearch       string
 }
 
@@ -60,19 +63,19 @@ func ListIfaceNames() ([]string, error) {
 	return names, nil
 }
 
-// Load reads a site conf. A missing file returns an empty Site and nil error.
-// Obsolete unit= lines are ignored so older confs still load.
+// Load reads and validates a site conf. Missing file is an error that names
+// the expected path and the shipped example to copy.
 func Load(iface string) (Site, error) {
 	path := Path(iface)
 	file, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return Site{WG: iface}, nil
+			return Site{}, fmt.Errorf("site conf %s not found; copy %s and edit it first", path, ExamplePath)
 		}
 		return Site{}, err
 	}
 	defer file.Close()
-	site := Site{WG: iface}
+	site := Site{Interface: iface}
 	scanner := bufio.NewScanner(file)
 	lineNo := 0
 	for scanner.Scan() {
@@ -88,101 +91,32 @@ func Load(iface string) (Site, error) {
 		key = strings.TrimSpace(key)
 		value = strings.TrimSpace(value)
 		switch key {
-		case "wg":
-			site.WG = value
+		case "interface":
+			site.Interface = value
 		case "db":
 			site.DB = value
 		case "private-endpoint":
 			site.PrivateEndpoint = value
-		case "home-cidrs":
-			site.HomeCIDRs = value
+		case "home-networks":
+			site.HomeNetworks = value
 		case "public-endpoint":
 			site.PublicEndpoint = value
-		case "dns":
-			site.DNS = value
+		case "dns-servers":
+			site.DNSServers = value
 		case "dns-search":
 			site.DNSSearch = value
-		case "unit":
-			// Obsolete: rehydrate units no longer depend on networkd vs wg-quick.
 		default:
-			return Site{}, fmt.Errorf("%s:%d: unknown key %q (allowed: wg, db, private-endpoint, home-cidrs, public-endpoint, dns, dns-search)", path, lineNo, key)
+			return Site{}, fmt.Errorf("%s:%d: unknown key %q (allowed: interface, db, private-endpoint, public-endpoint, home-networks, dns-servers, dns-search)", path, lineNo, key)
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return Site{}, err
 	}
-	if site.WG == "" {
-		site.WG = iface
+	if site.Interface == "" {
+		site.Interface = iface
 	}
-	if site.WG != iface {
-		return Site{}, fmt.Errorf("%s: wg=%s does not match conf file for %s", path, site.WG, iface)
+	if site.Interface != iface {
+		return Site{}, fmt.Errorf("%s: interface=%s does not match conf file for %s", path, site.Interface, iface)
 	}
 	return site, nil
-}
-
-// Save writes the site conf (0600) under Dir.
-func Save(site Site) error {
-	if site.WG == "" {
-		return fmt.Errorf("wg is required")
-	}
-	if err := os.MkdirAll(Dir, 0o755); err != nil {
-		return err
-	}
-	var b strings.Builder
-	b.WriteString("# Moorlan site settings for " + site.WG + " (not peers; peers live in SQLite).\n")
-	fmt.Fprintf(&b, "wg=%s\n", site.WG)
-	if site.DB != "" {
-		fmt.Fprintf(&b, "db=%s\n", site.DB)
-	}
-	if site.PrivateEndpoint != "" {
-		fmt.Fprintf(&b, "private-endpoint=%s\n", site.PrivateEndpoint)
-	}
-	if site.HomeCIDRs != "" {
-		fmt.Fprintf(&b, "home-cidrs=%s\n", site.HomeCIDRs)
-	}
-	if site.PublicEndpoint != "" {
-		fmt.Fprintf(&b, "public-endpoint=%s\n", site.PublicEndpoint)
-	}
-	if site.DNS != "" {
-		fmt.Fprintf(&b, "dns=%s\n", site.DNS)
-	}
-	if site.DNSSearch != "" {
-		fmt.Fprintf(&b, "dns-search=%s\n", site.DNSSearch)
-	}
-	path := Path(site.WG)
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, []byte(b.String()), 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
-}
-
-// Apply overlays explicitly set CLI flags onto conf. Load order: conf → flags.
-func Apply(conf, flags Site, explicit map[string]bool) Site {
-	out := conf
-	if out.WG == "" {
-		out.WG = "wg0"
-	}
-	if explicit["wg"] {
-		out.WG = flags.WG
-	}
-	if explicit["db"] {
-		out.DB = flags.DB
-	}
-	if explicit["private-endpoint"] {
-		out.PrivateEndpoint = flags.PrivateEndpoint
-	}
-	if explicit["home-cidrs"] {
-		out.HomeCIDRs = flags.HomeCIDRs
-	}
-	if explicit["public-endpoint"] {
-		out.PublicEndpoint = flags.PublicEndpoint
-	}
-	if explicit["dns"] {
-		out.DNS = flags.DNS
-	}
-	if explicit["dns-search"] {
-		out.DNSSearch = flags.DNSSearch
-	}
-	return out
 }

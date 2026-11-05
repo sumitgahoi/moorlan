@@ -6,15 +6,11 @@ struct SettingsView: View {
     @EnvironmentObject private var tunnel: TunnelManager
     @Environment(\.dismiss) private var dismiss
     @State private var showUnpairScanner = false
+    @State private var showForgetConfirm = false
     @State private var tipTitle = ""
     @State private var tipMessage = ""
     @State private var showTip = false
     @State private var deviceLabelDraft = ""
-    @State private var dnsDraft = ""
-    @State private var dnsSearchDraft = ""
-    @State private var keepaliveDraft = ""
-    @State private var mtuDraft = ""
-    @State private var clientError: String?
 
     var body: some View {
         NavigationStack {
@@ -25,7 +21,6 @@ struct SettingsView: View {
                         .autocorrectionDisabled()
                         .onSubmit { commitDeviceLabel() }
                         .onChange(of: deviceLabelDraft) { _, _ in
-                            // Commit as the user types so pair uses the latest value.
                             commitDeviceLabel()
                         }
                 } header: {
@@ -38,8 +33,8 @@ struct SettingsView: View {
                 Section {
                     Picker("Away default", selection: modeBinding) {
                         Text("Automatic").tag(TunnelPolicy.Mode.automatic)
-                        Text("Home LAN only").tag(TunnelPolicy.Mode.split)
-                        Text("Exit Node").tag(TunnelPolicy.Mode.exit)
+                        Text("Home access only").tag(TunnelPolicy.Mode.split)
+                        Text("Full protection").tag(TunnelPolicy.Mode.exit)
                     }
                     Toggle(isOn: cellularBinding) {
                         Text("Treat cellular as trusted")
@@ -47,7 +42,7 @@ struct SettingsView: View {
                 } header: {
                     sectionHeader(
                         "Routing",
-                        tip: "Automatic turns Exit Node on for unknown Wi‑Fi, and off for trusted Wi‑Fi and cellular. The Home screen Exit Node toggle overrides until you choose Automatic again. AllowedIPs follow this mode; they are not free-form."
+                        tip: "Automatic: Home keeps the tunnel off; Trusted Wi‑Fi and cellular use home access only; other Wi‑Fi uses full protection. Manual modes override Automatic except Home always disconnects. Away default and Trusted SSIDs are phone-wide (shared across tunnels). DNS comes from the server lease only."
                     )
                 }
 
@@ -65,56 +60,47 @@ struct SettingsView: View {
                 } header: {
                     sectionHeader(
                         "Networks",
-                        tip: "Home keeps the tunnel off. Trusted uses Home LAN only (Exit Node off) in Automatic. Normal / unmarked Wi‑Fi uses Exit Node in Automatic."
+                        tip: "Home is your house LAN — tunnel off. Trusted is a safe network that is not Home — home access only. Away / unmarked Wi‑Fi uses full protection in Automatic. Home and Trusted are different on purpose."
                     )
                 }
 
-                if let server = tunnel.selectedServer {
+                if tunnel.servers.count > 1 {
                     Section {
-                        TextField("DNS servers", text: $dnsDraft, prompt: Text(dnsPlaceholder(server)))
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .keyboardType(.numbersAndPunctuation)
-                            .onSubmit { commitClientSettings() }
-                        TextField("Search domains", text: $dnsSearchDraft, prompt: Text(dnsSearchPlaceholder(server)))
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .keyboardType(.URL)
-                            .onSubmit { commitClientSettings() }
-                        Text("Leave blank to use the server lease (or 1.1.1.1 in Exit Node when the lease has no DNS). Server DNS: \(server.serverDNSDescription). Search: \(server.serverDNSSearchDescription)")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                        if server.client.dns != nil || server.client.dnsSearch != nil {
-                            Button("Reset DNS to server") {
-                                dnsDraft = ""
-                                dnsSearchDraft = ""
-                                commitClientSettings()
+                        ForEach(tunnel.servers) { server in
+                            Button {
+                                Task {
+                                    await tunnel.selectProfile(server.id)
+                                    await tunnel.applyDesiredState()
+                                }
+                            } label: {
+                                HStack {
+                                    Text(server.displayName)
+                                        .foregroundStyle(.primary)
+                                    Spacer()
+                                    if server.id == tunnel.selectedServer?.id {
+                                        Image(systemName: "checkmark")
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
                             }
-                        }
-                        TextField("Keepalive (seconds)", text: $keepaliveDraft, prompt: Text(keepalivePlaceholder(server)))
-                            .keyboardType(.numberPad)
-                            .onSubmit { commitClientSettings() }
-                        TextField("MTU", text: $mtuDraft, prompt: Text(mtuPlaceholder(server)))
-                            .keyboardType(.numberPad)
-                            .onSubmit { commitClientSettings() }
-                        if let clientError {
-                            Text(clientError).font(.footnote).foregroundStyle(.red)
-                        }
-                        Button("Apply tunnel settings") { commitClientSettings() }
                             .disabled(tunnel.isUnpairing)
+                        }
                     } header: {
                         sectionHeader(
-                            "Tunnel on this iPhone",
-                            tip: "DNS, search domains, keepalive, and MTU are phone overrides. They do not change the Moorlan host. Routing/AllowedIPs stay under Away default above."
+                            "Tunnels",
+                            tip: "Only the selected tunnel auto-activates. Pairing another host adds a tunnel; it does not remove existing ones."
                         )
                     }
+                }
 
+                if let server = tunnel.selectedServer {
                     Section {
                         LabeledContent("Host", value: server.displayName)
                         DisclosureGroup("Server lease") {
                             LabeledContent("Client IP", value: server.lease.address)
                             LabeledContent("Endpoint", value: server.lease.endpoint ?? "—")
-                            LabeledContent("Home CIDRs", value: server.lan ?? "Unknown")
+                            LabeledContent("Tunnel network", value: server.lease.tunnelNetwork)
+                            LabeledContent("Home networks", value: server.homeNetworksDescription)
                             LabeledContent("DNS", value: server.serverDNSDescription)
                             LabeledContent("Search domains", value: server.serverDNSSearchDescription)
                             LabeledContent("Keepalive", value: "\(server.lease.persistentKeepalive ?? 25)s")
@@ -123,14 +109,18 @@ struct SettingsView: View {
                             }
                             LabeledContent("Public key", value: String(server.publicKey.prefix(20)) + "…")
                         }
-                        Button(tunnel.isUnpairing ? "Deleting…" : "Delete profile", role: .destructive) {
+                        Button(tunnel.isUnpairing ? "Deleting…" : "Unpair with QR", role: .destructive) {
                             showUnpairScanner = true
+                        }
+                        .disabled(tunnel.isUnpairing)
+                        Button("Remove from this iPhone", role: .destructive) {
+                            showForgetConfirm = true
                         }
                         .disabled(tunnel.isUnpairing)
                     } header: {
                         sectionHeader(
                             "Paired host",
-                            tip: "Read-only lease from the server. To delete, run moorlan --unpair on the server, then scan its QR on home Wi‑Fi."
+                            tip: "Read-only lease from the server. Prefer Unpair with QR on Home Wi‑Fi so the host deletes the peer. Remove from this iPhone only clears local VPN settings if the server already unpaired or cleanup got stuck."
                         )
                     }
                 }
@@ -147,11 +137,26 @@ struct SettingsView: View {
             } message: {
                 Text(tipMessage)
             }
+            .confirmationDialog(
+                "Remove \(tunnel.selectedServer?.displayName ?? "this host") from this iPhone?",
+                isPresented: $showForgetConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Remove from this iPhone", role: .destructive) {
+                    guard let server = tunnel.selectedServer else { return }
+                    Task {
+                        await tunnel.forgetLocalHost(server)
+                        if tunnel.servers.isEmpty { dismiss() }
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Deletes the local VPN profile only. If the Moorlan host still has this peer, run moorlan --unpair there or re-pair later.")
+            }
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
                         commitDeviceLabel()
-                        commitClientSettings()
                         dismiss()
                     }
                     .disabled(tunnel.isUnpairing)
@@ -159,9 +164,7 @@ struct SettingsView: View {
             }
             .onAppear {
                 deviceLabelDraft = tunnel.deviceLabel
-                loadClientDrafts()
             }
-            .onChange(of: tunnel.selectedServerID) { _, _ in loadClientDrafts() }
         }
     }
 
@@ -171,95 +174,6 @@ struct SettingsView: View {
             tunnel.deviceLabel = trimmed.isEmpty ? UIDevice.current.name : trimmed
             deviceLabelDraft = tunnel.deviceLabel
         }
-    }
-
-    private func loadClientDrafts() {
-        guard let server = tunnel.selectedServer else {
-            dnsDraft = ""
-            dnsSearchDraft = ""
-            keepaliveDraft = ""
-            mtuDraft = ""
-            clientError = nil
-            return
-        }
-        dnsDraft = ClientTunnelSettings.formatDNS(server.client.dns)
-        dnsSearchDraft = ClientTunnelSettings.formatDNSSearch(server.client.dnsSearch)
-        if let keepalive = server.client.persistentKeepalive {
-            keepaliveDraft = String(keepalive)
-        } else {
-            keepaliveDraft = ""
-        }
-        if let mtu = server.client.mtu {
-            mtuDraft = String(mtu)
-        } else {
-            mtuDraft = ""
-        }
-        clientError = nil
-    }
-
-    private func commitClientSettings() {
-        guard let server = tunnel.selectedServer else { return }
-        let dns: [String]?
-        switch ClientTunnelSettings.parseDNS(dnsDraft) {
-        case .failure(let error):
-            clientError = error.message
-            return
-        case .success(let value):
-            dns = value
-        }
-        let dnsSearch: [String]?
-        switch ClientTunnelSettings.parseDNSSearch(dnsSearchDraft) {
-        case .failure(let error):
-            clientError = error.message
-            return
-        case .success(let value):
-            dnsSearch = value
-        }
-        var client = server.client
-        client.dns = dns
-        client.dnsSearch = dnsSearch
-        let keepaliveText = keepaliveDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        if keepaliveText.isEmpty {
-            client.persistentKeepalive = nil
-        } else if let value = Int(keepaliveText), (5...120).contains(value) {
-            client.persistentKeepalive = value
-        } else {
-            clientError = "Keepalive must be 5–120 seconds"
-            return
-        }
-        let mtuText = mtuDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        if mtuText.isEmpty {
-            client.mtu = nil
-        } else if let value = Int(mtuText), (1280...1500).contains(value) {
-            client.mtu = value
-        } else {
-            clientError = "MTU must be 1280–1500"
-            return
-        }
-        clientError = nil
-        tunnel.saveClientSettings(client)
-        loadClientDrafts()
-    }
-
-    private func dnsPlaceholder(_ server: PairedServer) -> String {
-        let lease = (server.lease.dns ?? []).filter { !$0.isEmpty }
-        if !lease.isEmpty { return lease.joined(separator: ", ") }
-        return "1.1.1.1, 1.0.0.1"
-    }
-
-    private func dnsSearchPlaceholder(_ server: PairedServer) -> String {
-        let search = (server.lease.dnsSearch ?? []).filter { !$0.isEmpty }
-        if !search.isEmpty { return search.joined(separator: ", ") }
-        return "home.arpa"
-    }
-
-    private func keepalivePlaceholder(_ server: PairedServer) -> String {
-        "\(server.lease.persistentKeepalive ?? 25)"
-    }
-
-    private func mtuPlaceholder(_ server: PairedServer) -> String {
-        if let mtu = server.lease.mtu { return "\(mtu)" }
-        return "default"
     }
 
     private func networkRow(_ id: String) -> some View {
@@ -327,15 +241,15 @@ struct SettingsView: View {
         switch role {
         case .home: return "Home"
         case .trusted: return "Trusted"
-        case .normal: return "Normal"
+        case .away: return "Away"
         }
     }
 
     private func roleSubtitle(_ role: TunnelManager.NetworkRole) -> String {
         switch role {
         case .home: return "Home · tunnel off"
-        case .trusted: return "Trusted · Home LAN only"
-        case .normal: return "Normal · Exit Node when away"
+        case .trusted: return "Trusted · home access only"
+        case .away: return "Away · full protection"
         }
     }
 

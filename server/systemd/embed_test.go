@@ -13,7 +13,7 @@ func TestRenderSubstitutesInterface(t *testing.T) {
 	if strings.Contains(text, ifacePlaceholder) {
 		t.Fatalf("still has placeholder:\n%s", text)
 	}
-	if !strings.Contains(text, "ExecStart=/usr/local/bin/moorlan --rehydrate -wg wg2") {
+	if !strings.Contains(text, "ExecStart=/usr/local/bin/moorlan --reconcile --interface wg2") {
 		t.Fatalf("bad ExecStart:\n%s", text)
 	}
 	if !strings.Contains(text, "Restart=on-failure") || !strings.Contains(text, "StartLimitBurst=30") {
@@ -25,7 +25,7 @@ func TestRenderSubstitutesInterface(t *testing.T) {
 }
 
 func TestUnitPath(t *testing.T) {
-	if got := UnitPath("wg1"); got != "/etc/systemd/system/moorlan-rehydrate-wg1.service" {
+	if got := UnitPath("wg1"); got != "/etc/systemd/system/moorlan-reconcile-wg1.service" {
 		t.Fatal(got)
 	}
 }

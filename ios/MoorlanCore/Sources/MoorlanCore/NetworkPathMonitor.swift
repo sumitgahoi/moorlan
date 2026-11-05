@@ -1,6 +1,5 @@
 import Foundation
 import Network
-import Darwin
 #if os(iOS)
 import NetworkExtension
 #endif
@@ -93,39 +92,9 @@ public final class NetworkPathMonitor: ObservableObject {
         if let wifiOverrideID, !wifiOverrideID.isEmpty {
             return wifiOverrideID
         }
-        // An interface name such as en0 identifies hardware, not a Wi-Fi network.
-        // Unknown networks always use the untrusted default and cannot be trusted.
+        // Interface names (en0) are hardware, not network identity. Unknown SSID
+        // stays "unidentified"; TunnelPolicy fails closed (disconnect, never exit).
+        _ = interfaces
         return "unidentified"
-    }
-}
-
-struct IPv4Network {
-    let network: UInt32
-    let mask: UInt32
-
-    init?(_ cidr: String) {
-        let parts = cidr.split(separator: "/")
-        guard parts.count == 2,
-              let prefix = Int(parts[1]),
-              (0...32).contains(prefix),
-              let ip = IPv4Address(String(parts[0])) else {
-            return nil
-        }
-        mask = prefix == 0 ? 0 : UInt32.max << (32 - prefix)
-        network = ip.raw & mask
-    }
-
-    func contains(_ ip: IPv4Address) -> Bool {
-        (ip.raw & mask) == network
-    }
-}
-
-struct IPv4Address {
-    let raw: UInt32
-
-    init?(_ text: String) {
-        var address = in_addr()
-        guard inet_pton(AF_INET, text, &address) == 1 else { return nil }
-        raw = UInt32(bigEndian: address.s_addr)
     }
 }

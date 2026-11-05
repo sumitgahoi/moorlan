@@ -15,13 +15,14 @@ struct HomeView: View {
                     .padding(.bottom, 28)
 
                 VStack(spacing: 6) {
-                    Text(statusTitle)
+                    Text(tunnel.statusHeadline)
                         .font(.largeTitle.weight(.bold))
                         .multilineTextAlignment(.center)
+                        .accessibilityAddTraits(.isHeader)
 
                     profileLabel
 
-                    Text(statusSubtitle)
+                    Text(tunnel.statusDetail)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
@@ -36,20 +37,6 @@ struct HomeView: View {
                     }
                 }
                 .padding(.horizontal, 28)
-
-                if showsExitToggle {
-                    Toggle(isOn: exitBinding) {
-                        Text("Exit Node")
-                            .font(.body.weight(.medium))
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-                    .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .padding(.horizontal, 28)
-                    .padding(.top, 28)
-                    .disabled(tunnel.isUnpairing)
-                    .accessibilityHint("When on, all traffic goes through home. When off, only your home network is reachable.")
-                }
 
                 Spacer(minLength: 24)
 
@@ -68,6 +55,7 @@ struct HomeView: View {
                     tunnel.status == .connecting
                         || tunnel.status == .disconnecting
                         || tunnel.onHomeWiFi
+                        || tunnel.wifiIdentityMissing
                         || tunnel.isUnpairing
                 )
                 .padding(.horizontal, 28)
@@ -89,7 +77,7 @@ struct HomeView: View {
                     Button(action: onScan) {
                         Image(systemName: "qrcode.viewfinder")
                     }
-                    .accessibilityLabel("Scan QR")
+                    .accessibilityLabel("Scan to pair")
                     .disabled(tunnel.isUnpairing)
                 }
             }
@@ -101,16 +89,22 @@ struct HomeView: View {
         if tunnel.servers.count > 1 {
             Menu {
                 ForEach(tunnel.servers) { server in
-                    Button(server.displayName) {
+                    Button {
                         Task {
                             await tunnel.selectProfile(server.id)
                             await tunnel.applyDesiredState()
+                        }
+                    } label: {
+                        if server.id == tunnel.selectedServer?.id {
+                            Label(server.displayName, systemImage: "checkmark")
+                        } else {
+                            Text(server.displayName)
                         }
                     }
                 }
             } label: {
                 HStack(spacing: 4) {
-                    Text(tunnel.selectedServer?.displayName ?? "Choose profile")
+                    Text(tunnel.selectedServer?.displayName ?? "Choose tunnel")
                         .font(.body.weight(.medium))
                     Image(systemName: "chevron.up.chevron.down")
                         .font(.caption.weight(.semibold))
@@ -118,7 +112,7 @@ struct HomeView: View {
                 }
             }
             .disabled(tunnel.isUnpairing)
-            .accessibilityLabel("Profile")
+            .accessibilityLabel("Tunnel")
             .accessibilityValue(tunnel.selectedServer?.displayName ?? "None")
         } else if let name = tunnel.selectedServer?.displayName {
             Text(name)
@@ -127,18 +121,8 @@ struct HomeView: View {
         }
     }
 
-    private var showsExitToggle: Bool {
-        !tunnel.onHomeWiFi && (tunnel.status == .connected || tunnel.status == .connecting)
-    }
-
-    private var exitBinding: Binding<Bool> {
-        Binding(
-            get: { tunnel.effectiveExit },
-            set: { tunnel.setExit($0) }
-        )
-    }
-
     private var diagramState: ConnectionDiagramView.LinkState {
+        if tunnel.wifiIdentityMissing { return .unreachable }
         if tunnel.onHomeWiFi { return .atHome }
         switch tunnel.status {
         case .invalid: return .unreachable
@@ -147,36 +131,6 @@ struct HomeView: View {
             return tunnel.effectiveExit ? .connectedExit : .connectedSplit
         case .disconnected:
             return .idle
-        }
-    }
-
-    private var statusTitle: String {
-        if tunnel.onHomeWiFi { return "Off · Home" }
-        switch tunnel.status {
-        case .connected: return "Connected"
-        case .connecting: return "Connecting"
-        case .disconnecting: return "Disconnecting"
-        case .invalid: return "Needs Attention"
-        case .disconnected: return "Disconnected"
-        }
-    }
-
-    private var statusSubtitle: String {
-        if tunnel.onHomeWiFi { return "Tunnel stays off here" }
-        switch tunnel.status {
-        case .connected:
-            return tunnel.effectiveExit ? "All traffic via home" : "Home LAN only"
-        case .connecting:
-            return "Reaching your home…"
-        case .disconnecting:
-            return "Closing the tunnel…"
-        case .invalid:
-            return tunnel.statusReason ?? "Check VPN permission in Settings"
-        case .disconnected:
-            if tunnel.statusReason == "Waiting for a network" {
-                return "Waiting for a network"
-            }
-            return "Tap Connect when you’re away from home"
         }
     }
 

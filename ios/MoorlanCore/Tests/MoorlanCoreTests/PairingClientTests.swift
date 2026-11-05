@@ -5,11 +5,31 @@ import XCTest
 final class PairingClientTests: XCTestCase {
     private let key = Data(repeating: 1, count: 32).base64EncodedString()
 
+    private func lease(
+        publicKey: String? = nil,
+        tunnelNetwork: String = "10.8.0.0/24",
+        homeNetworks: [String] = ["192.168.1.0/24"],
+        dnsServers: [String] = ["192.168.1.1"],
+        dnsSearch: [String]? = ["home.arpa"],
+        unpairToken: String? = "peer-secret"
+    ) -> Lease {
+        Lease(
+            address: "10.8.0.2/32",
+            tunnelNetwork: tunnelNetwork,
+            homeNetworks: homeNetworks,
+            publicKey: publicKey ?? key,
+            endpoint: "vpn.example:51820",
+            dnsServers: dnsServers,
+            dnsSearch: dnsSearch,
+            unpairToken: unpairToken,
+            persistentKeepalive: 25
+        )
+    }
+
     private func server(credential: String? = "peer-secret") -> PairedServer {
         PairedServer(
             card: QRCard(pairURL: URL(string: "http://192.168.1.10:8756/v1/pair")!, serverPublicKey: key),
-            lease: Lease(address: "10.8.0.2/32", prefixes: ["10.8.0.0/24"], publicKey: key,
-                         endpoint: "vpn.example:51820", lan: "192.168.1.0/24", dns: ["192.168.1.1"], unpairToken: credential)
+            lease: lease(unpairToken: credential)
         )
     }
 
@@ -31,18 +51,26 @@ final class PairingClientTests: XCTestCase {
         return Data()
     }
 
-    func testVersionOneQRAndLease() throws {
+    func testVersionOneQRAndLeaseFields() throws {
         let card = try QRCard.parse("""
         {"v":1,"pair_url":"http://192.168.1.10:8756/v1/pair","server_public_key":"\(key)"}
         """)
         XCTAssertEqual(card.v, 1)
         let lease = try JSONDecoder().decode(Lease.self, from: Data("""
-        {"address":"10.8.0.2/32","prefixes":["10.8.0.0/24"],"lan":"192.168.1.0/24","dns":["192.168.1.1"],"public_key":"\(key)","endpoint":"vpn.example:51820","persistent_keepalive":25,"unpair_token":"peer-secret"}
+        {"address":"10.8.0.2/32","tunnel_network":"10.8.0.0/24","home_networks":["192.168.1.0/24"],"dns_servers":["192.168.1.1"],"dns_search":["home.arpa"],"public_key":"\(key)","endpoint":"vpn.example:51820","persistent_keepalive":25,"unpair_token":"peer-secret"}
         """.utf8))
         XCTAssertEqual(lease.unpairToken, "peer-secret")
-        XCTAssertNil(lease.listenPort)
-        XCTAssertEqual(lease.lan, "192.168.1.0/24")
-        XCTAssertEqual(lease.dns, ["192.168.1.1"])
+        XCTAssertEqual(lease.tunnelNetwork, "10.8.0.0/24")
+        XCTAssertEqual(lease.homeNetworks, ["192.168.1.0/24"])
+        XCTAssertEqual(lease.dnsServers, ["192.168.1.1"])
+        XCTAssertEqual(lease.dnsSearch, ["home.arpa"])
+    }
+
+    func testLeaseRejectsLegacyFieldNames() {
+        let legacy = Data("""
+        {"address":"10.8.0.2/32","prefixes":["10.8.0.0/24"],"lan":"192.168.1.0/24","dns":["192.168.1.1"],"public_key":"\(key)","endpoint":"vpn.example:51820","unpair_token":"peer-secret"}
+        """.utf8)
+        XCTAssertThrowsError(try JSONDecoder().decode(Lease.self, from: legacy))
     }
 
     func testPairingSendsDeviceKeyLabelAndChecksServerIdentity() async throws {
@@ -53,18 +81,43 @@ final class PairingClientTests: XCTestCase {
                 XCTAssertEqual(request.httpMethod, "POST")
                 let body = try JSONSerialization.jsonObject(with: try self.requestBody(request)) as! [String: String]
                 XCTAssertEqual(body, ["public_key": self.key, "label": "iPhone 17"])
-                let lease = Lease(address: "10.8.0.2/32", prefixes: ["10.8.0.0/24"],
-                                  publicKey: responseKey, endpoint: "vpn.example:51820",
-                                  lan: "192.168.1.0/24", dns: ["192.168.1.1"], unpairToken: "peer-secret")
-                return (200, try JSONEncoder().encode(lease))
+                return (200, try JSONEncoder().encode(self.lease(publicKey: responseKey)))
             }
             do {
                 let lease = try await PairingClient().pair(card: card, publicKey: key, label: "iPhone 17", session: session)
                 XCTAssertTrue(matches, "Accepted a server identity different from the QR")
                 XCTAssertEqual(lease.publicKey, key)
+                XCTAssertEqual(lease.dnsServers, ["192.168.1.1"])
             } catch {
                 if matches { XCTFail("Pairing failed: \(error)") }
-                else { XCTAssertTrue(error.localizedDescription.contains("identity")) }
+                else {
+                    let facing = UserFacingError.map(error)
+                    XCTAssertTrue(
+                        facing.message.localizedCaseInsensitiveContains("mismatch")
+                            || facing.message.localizedCaseInsensitiveContains("QR")
+                            || error.localizedDescription.contains("identity")
+                    )
+                }
+            }
+            session.invalidateAndCancel()
+        }
+    }
+
+    func testPairRejectsIncompleteLeaseMissingDNSOrNetworks() async {
+        let card = server().card
+        let incomplete = [
+            lease(tunnelNetwork: ""),
+            lease(homeNetworks: []),
+            lease(dnsServers: []),
+            lease(unpairToken: nil)
+        ]
+        for bad in incomplete {
+            let session = session { _ in (200, try JSONEncoder().encode(bad)) }
+            do {
+                _ = try await PairingClient().pair(card: card, publicKey: key, label: "iPhone", session: session)
+                XCTFail("Expected incomplete lease rejection")
+            } catch {
+                XCTAssertEqual(UserFacingError.map(error).title, "Incomplete lease")
             }
             session.invalidateAndCancel()
         }
@@ -92,12 +145,25 @@ final class PairingClientTests: XCTestCase {
         try await PairingClient().unpair(server: server(), publicKey: key, session: session)
     }
 
+    func testUnpairTreatsGoneAsSuccessSignal() async {
+        for code in [404, 410] {
+            let session = session { _ in (code, Data()) }
+            do {
+                try await PairingClient().unpair(server: server(), publicKey: key, session: session)
+                XCTFail("Expected unpairAlreadyGone for HTTP \(code)")
+            } catch {
+                XCTAssertEqual(error as? MoorlanError, .unpairAlreadyGone)
+            }
+            session.invalidateAndCancel()
+        }
+    }
+
     func testUnpairRejectsFailureAndNetworkError() async {
         for code in [200, 403, 500] {
             let session = session { _ in (code, Data("{\"error\":\"not removed\"}".utf8)) }
             do {
                 try await PairingClient().unpair(server: server(), publicKey: key, session: session)
-                XCTFail("Only 204 confirms removal")
+                XCTFail("Only 204 / already-gone confirms removal")
             } catch { }
             session.invalidateAndCancel()
         }
@@ -109,7 +175,9 @@ final class PairingClientTests: XCTestCase {
         } catch {
             XCTAssertTrue(error.localizedDescription.contains("192.168.1.10:8756"), error.localizedDescription)
             XCTAssertTrue(error.localizedDescription.contains("Local Network"), error.localizedDescription)
-            XCTAssertTrue(error.localizedDescription.contains("firewall"), error.localizedDescription)
+            let facing = UserFacingError.map(error)
+            XCTAssertEqual(facing.title, "Can’t reach the host")
+            XCTAssertEqual(facing.action, .openSettings)
         }
     }
 
@@ -140,7 +208,7 @@ final class PairingClientTests: XCTestCase {
         }
     }
 
-    func testOldStoredCardKeepsNameAndLAN() throws {
+    func testOldStoredCardKeepsName() throws {
         let card = try JSONDecoder().decode(QRCard.self, from: Data("""
         {"v":1,"name":"wg0","lan":"192.168.1.0/24","pair_url":"http://192.168.1.10:8756/v1/pair","token":"old-token"}
         """.utf8))

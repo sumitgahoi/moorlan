@@ -41,8 +41,7 @@ func initStore(path, serverKey string, livePeers int) error {
 		defer tx.Rollback()
 		_, err = tx.Exec(`
  CREATE TABLE IF NOT EXISTS metadata (server_key TEXT NOT NULL);
- CREATE TABLE IF NOT EXISTS peers (public_key TEXT PRIMARY KEY NOT NULL, address TEXT UNIQUE NOT NULL, label TEXT NOT NULL DEFAULT '');
- CREATE TABLE IF NOT EXISTS pending_removals (public_key TEXT PRIMARY KEY NOT NULL, label TEXT NOT NULL DEFAULT '');`)
+ CREATE TABLE IF NOT EXISTS peers (public_key TEXT PRIMARY KEY NOT NULL, address TEXT UNIQUE NOT NULL, label TEXT NOT NULL DEFAULT '');`)
 		if err == nil {
 			_, err = tx.Exec("INSERT INTO metadata(server_key) VALUES (?)", serverKey)
 		}
@@ -112,7 +111,8 @@ func openStore(path, serverKey string) (*peerStore, error) {
 	if err = ensurePeerLabelColumn(db); err != nil {
 		return fail(err)
 	}
-	if err = ensurePendingLabelColumn(db); err != nil {
+	// Drop legacy deletion journal if an older database still has it.
+	if _, err = db.Exec(`DROP TABLE IF EXISTS pending_removals`); err != nil {
 		return fail(err)
 	}
 	return &peerStore{db: db}, nil
@@ -165,63 +165,6 @@ func (s *peerStore) list(ctx context.Context) ([]iface.Peer, error) {
 	}
 	return out, rows.Err()
 }
-func ensurePendingLabelColumn(db *sql.DB) error {
-	rows, err := db.Query(`PRAGMA table_info(pending_removals)`)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	hasLabel := false
-	for rows.Next() {
-		var cid int
-		var name, ctype string
-		var notNull, pk int
-		var dflt sql.NullString
-		if err := rows.Scan(&cid, &name, &ctype, &notNull, &dflt, &pk); err != nil {
-			return err
-		}
-		if name == "label" {
-			hasLabel = true
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	if !hasLabel {
-		_, err = db.Exec(`ALTER TABLE pending_removals ADD COLUMN label TEXT NOT NULL DEFAULT ''`)
-		return err
-	}
-	return nil
-}
-
-func (s *peerStore) pending(ctx context.Context) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT public_key FROM pending_removals ORDER BY public_key")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []string
-	for rows.Next() {
-		var key string
-		if err := rows.Scan(&key); err != nil {
-			return nil, err
-		}
-		out = append(out, key)
-	}
-	return out, rows.Err()
-}
-
-func (s *peerStore) lookupPendingKey(ctx context.Context, key string) (iface.Peer, error) {
-	var label string
-	err := s.db.QueryRowContext(ctx, "SELECT label FROM pending_removals WHERE public_key=?", key).Scan(&label)
-	if err == sql.ErrNoRows {
-		return iface.Peer{}, fmt.Errorf("no managed peer with public key %q", key)
-	}
-	if err != nil {
-		return iface.Peer{}, err
-	}
-	return iface.Peer{PublicKey: key, Label: label}, nil
-}
 
 func (s *peerStore) insert(ctx context.Context, key, address, label string) error {
 	_, err := s.db.ExecContext(ctx, "INSERT INTO peers(public_key,address,label) VALUES (?,?,?)", key, address, label)
@@ -243,36 +186,28 @@ func (s *peerStore) lookupPublicKey(ctx context.Context, key string) (iface.Peer
 	return iface.Peer{PublicKey: key, AllowedIPs: []string{address}, Label: label}, nil
 }
 
-func (s *peerStore) remove(ctx context.Context, key, label string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+// delete removes the peer row. It returns whether a row was deleted.
+func (s *peerStore) delete(ctx context.Context, key string) (bool, error) {
+	res, err := s.db.ExecContext(ctx, "DELETE FROM peers WHERE public_key=?", key)
 	if err != nil {
-		return err
+		return false, err
 	}
-	defer tx.Rollback()
-	// Short deletion journal: crash between commit and apply must not resurrect access.
-	// Label is retained for humans inspecting the DB; admin --remove-peer is by public key only.
-	if _, err = tx.ExecContext(ctx, `INSERT INTO pending_removals(public_key, label) VALUES (?,?)
-		ON CONFLICT(public_key) DO UPDATE SET label=excluded.label`, key, label); err != nil {
-		return err
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
 	}
-	if _, err = tx.ExecContext(ctx, "DELETE FROM peers WHERE public_key=?", key); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return n > 0, nil
 }
 
-// CountPeersAndPending returns how many peer and pending-removal rows exist.
-func CountPeersAndPending(path string) (peers, pending int, err error) {
+// CountPeers returns how many peer rows exist.
+func CountPeers(path string) (peers int, err error) {
 	db, err := connectStore(path)
 	if err != nil {
-		return 0, 0, err
+		return 0, err
 	}
 	defer db.Close()
 	if err = db.QueryRow(`SELECT COUNT(*) FROM peers`).Scan(&peers); err != nil {
-		return 0, 0, err
+		return 0, err
 	}
-	if err = db.QueryRow(`SELECT COUNT(*) FROM pending_removals`).Scan(&pending); err != nil {
-		return 0, 0, err
-	}
-	return peers, pending, nil
+	return peers, nil
 }

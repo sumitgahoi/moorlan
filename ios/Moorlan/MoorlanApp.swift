@@ -8,7 +8,6 @@ struct MoorlanApp: App {
         WindowGroup {
             RootView()
                 .environmentObject(tunnel)
-                .preferredColorScheme(.dark)
         }
     }
 }

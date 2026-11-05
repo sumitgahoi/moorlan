@@ -12,6 +12,7 @@ struct ConnectionDiagramView: View {
     }
 
     var state: LinkState
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(spacing: 0) {
@@ -36,7 +37,7 @@ struct ConnectionDiagramView: View {
         ZStack {
             FlowingDashLink(
                 color: linkTrack,
-                flowing: state == .connectedSplit || state == .connectedExit,
+                flowing: !reduceMotion && (state == .connectedSplit || state == .connectedExit),
                 speed: state == .connectedExit ? 36 : 22
             )
             .padding(.horizontal, 8)
@@ -54,7 +55,11 @@ struct ConnectionDiagramView: View {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.title2)
                     .foregroundStyle(.green)
-                    .symbolEffect(.pulse, options: .repeating, isActive: state == .connectedExit)
+                    .symbolEffect(
+                        .pulse,
+                        options: .repeating,
+                        isActive: !reduceMotion && state == .connectedExit
+                    )
                     .background(Circle().fill(Color(.systemBackground)).padding(-2))
             }
         }

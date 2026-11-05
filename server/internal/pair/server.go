@@ -15,9 +15,9 @@ import (
 
 type Lease struct {
 	Address             string   `json:"address"`
-	Prefixes            []string `json:"prefixes"`
-	LAN                 string   `json:"lan"`
-	DNS                 []string `json:"dns,omitempty"`
+	TunnelNetwork       string   `json:"tunnel_network"`
+	HomeNetworks        []string `json:"home_networks"`
+	DNSServers          []string `json:"dns_servers"`
 	DNSSearch           []string `json:"dns_search,omitempty"`
 	PublicKey           string   `json:"public_key"`
 	Endpoint            string   `json:"endpoint"`
@@ -40,7 +40,7 @@ type request struct {
 }
 
 // New serves enrollment and unpair. onSuccess runs after HTTP 2xx mutations only
-// (nil is fine). Bodies are plaintext JSON on the trusted LAN (see README).
+// (nil is fine). Bodies are plaintext JSON on the trusted LAN (see REQUIREMENTS).
 func New(assign Assigner, onSuccess func()) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/pair", func(w http.ResponseWriter, r *http.Request) {
