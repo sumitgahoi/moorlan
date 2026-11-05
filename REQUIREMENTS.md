@@ -7,25 +7,32 @@
 
 ## Server
 
-- Pair with an existing Linux WireGuard device named `moorlan0` / `moorlanN`
-  using trusted-LAN HTTP. Host owns the device; Moorlan owns all peers on it.
+- Pair with an existing Linux WireGuard device (any path-safe name, default `wg0`)
+  using trusted-LAN HTTP. Host owns the device; after `--add-interface`, Moorlan
+  owns all peers on it (device must have zero peers when first added).
 - Version 1 pairing QR: LAN URL and server public key, no invitation token;
   plaintext JSON over trusted-LAN HTTP including the phone device name as a
   label (duplicates allowed). Multiple devices can enroll while the admin
   leaves the process running.
-- Explicit endpoint or STUN public IPv4 plus configured WG port; no LAN fallback.
+- Sticky `public-endpoint` (DDNS or static host:port) is required; no STUN and
+  no LAN-only public endpoint fallback.
 - One private IPv4 interface subnet (/16–/30), automatic /32 allocation from
   live peers and SQLite assignments; no pool override. No wg-quick/networkd
   peer file writes.
-- SQLite is authoritative for enrolled peers; `--rehydrate` applies them live
-  after boot. Pair/unpair/`--remove` apply mutations via wgctrl.
-- `--init` exclusively creates a database for an empty device and never overwrites
-  an existing file. Every other mode requires an initialized database; no automatic
-  creation on startup or rehydrate.
+- Per-iface `/etc/moorlan/<iface>.conf` stores static site flags; CLI flags
+  override. Peers stay in SQLite. The release binary is installed to
+  `/usr/local/bin/moorlan` (checksummed GitHub Release asset; no installer
+  script). `--add-interface` is greenfield (refuses existing conf, DB, or
+  rehydrate unit). `--remove-interface` deletes those when no peers remain.
+- SQLite is authoritative for enrolled peers; boot `--rehydrate` applies them
+  live (one attempt; systemd retries while the WG device is not yet usable).
+  Pair/unpair/`--remove-peer` reconcile before work, then mutate via wgctrl.
+- `--add-interface` creates a new database for an empty device and never adopts
+  an existing DB. `--pair`/`--unpair` require an existing site conf.
 - One process per interface and one mutation mutex. Failed changes are retryable.
 - Unpair deletes the assignment and journals live removal until applied. Phone
   deletion uses the version 1 public QR and per-peer HMAC. Admin deletion uses
-  `--remove` by WireGuard public key only. No offline client queue.
+  `--remove-peer` by WireGuard public key only. No offline client queue.
 
 ## iPhone
 

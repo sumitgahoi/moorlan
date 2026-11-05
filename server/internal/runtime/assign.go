@@ -75,7 +75,7 @@ func (a *Assigner) client() (wireguardClient, error) {
 }
 
 // Reconcile applies SQLite to the live device: pending removals, install DB
-// peers, drop orphans (moorlanN is exclusively owned by Moorlan).
+// peers, drop orphans (the interface is exclusively owned by Moorlan).
 func (a *Assigner) Reconcile(ctx context.Context) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()

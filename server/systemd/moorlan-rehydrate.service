@@ -1,0 +1,19 @@
+[Unit]
+Description=Rehydrate Moorlan WireGuard peers
+Documentation=https://github.com/sumitgahoi/moorlan/blob/main/server/README.md
+# Template: __IFACE__ is replaced with the real interface name.
+# moorlan --rehydrate fails until the WireGuard device is usable; systemd retries.
+Requires=sys-subsystem-net-devices-__IFACE__.device
+After=sys-subsystem-net-devices-__IFACE__.device network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=30
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/moorlan --rehydrate -wg __IFACE__
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

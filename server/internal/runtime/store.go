@@ -68,7 +68,7 @@ func connectStore(path string) (*sql.DB, error) {
 	file, err := os.OpenFile(path, os.O_RDWR, 0)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("database %s does not exist; run --init for first-time setup, or restore the original database", path)
+			return nil, fmt.Errorf("database %s does not exist; run --add-interface for first-time setup, or restore the original database", path)
 		}
 		return nil, err
 	}
@@ -250,7 +250,7 @@ func (s *peerStore) remove(ctx context.Context, key, label string) error {
 	}
 	defer tx.Rollback()
 	// Short deletion journal: crash between commit and apply must not resurrect access.
-	// Label is retained for humans inspecting the DB; admin --remove is by public key only.
+	// Label is retained for humans inspecting the DB; admin --remove-peer is by public key only.
 	if _, err = tx.ExecContext(ctx, `INSERT INTO pending_removals(public_key, label) VALUES (?,?)
 		ON CONFLICT(public_key) DO UPDATE SET label=excluded.label`, key, label); err != nil {
 		return err
@@ -259,4 +259,20 @@ func (s *peerStore) remove(ctx context.Context, key, label string) error {
 		return err
 	}
 	return tx.Commit()
+}
+
+// CountPeersAndPending returns how many peer and pending-removal rows exist.
+func CountPeersAndPending(path string) (peers, pending int, err error) {
+	db, err := connectStore(path)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer db.Close()
+	if err = db.QueryRow(`SELECT COUNT(*) FROM peers`).Scan(&peers); err != nil {
+		return 0, 0, err
+	}
+	if err = db.QueryRow(`SELECT COUNT(*) FROM pending_removals`).Scan(&pending); err != nil {
+		return 0, 0, err
+	}
+	return peers, pending, nil
 }

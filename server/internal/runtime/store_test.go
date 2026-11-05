@@ -13,7 +13,7 @@ import (
 func TestOpenStoreRequiresExplicitInitialization(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "missing", "moorlan0.db")
 	key := wgtypes.Key{2}.String()
-	if _, err := openStore(path, key); err == nil || !strings.Contains(err.Error(), "--init") {
+	if _, err := openStore(path, key); err == nil || !strings.Contains(err.Error(), "--add-interface") {
 		t.Fatalf("missing database error: %v", err)
 	}
 	if _, err := os.Stat(filepath.Dir(path)); !os.IsNotExist(err) {

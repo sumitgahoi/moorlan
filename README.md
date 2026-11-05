@@ -10,16 +10,25 @@ This monorepo contains two independent applications:
 
 ## Quick start
 
-On the Linux server, bring up WireGuard device `moorlan0` yourself, then:
+On the Linux server, bring up an empty WireGuard device (e.g. `wg0`), then:
 
 ```bash
-cd server && go build -o moorlan ./cmd/moorlan
-sudo ./moorlan --init  # first-time setup only, with no peers on the device
-sudo ./moorlan --rehydrate
-sudo ./moorlan -private-endpoint 10.10.10.1:8756 -home-cidrs 10.10.0.0/24,10.10.10.0/24,10.10.20.0/24,10.10.30.0/24,10.10.40.0/24
+TAG=v0.1.0  # pick a release tag
+ARCH=amd64  # or arm64
+ASSET="moorlan-linux-${ARCH}"
+BASE="https://github.com/sumitgahoi/moorlan/releases/download/${TAG}"
+
+curl -fsSL -o "${ASSET}" "${BASE}/${ASSET}"
+curl -fsSL -o "${ASSET}.sha256" "${BASE}/${ASSET}.sha256"
+sha256sum -c "${ASSET}.sha256"
+sudo install -m 755 "${ASSET}" /usr/local/bin/moorlan
+
+sudo moorlan --add-interface wg0   # site conf + peer DB + rehydrate unit
+sudo moorlan --pair                # enrollment QR (home Wi‑Fi)
 ```
 
-Or download a release binary. See [server/README.md](server/README.md).
+Or build from source: `cd server && go build -o moorlan ./cmd/moorlan` and
+`sudo install -m 755 moorlan /usr/local/bin/moorlan`. See [server/README.md](server/README.md).
 
 On the iPhone, scan the QR on home Wi-Fi, allow Camera and Local Network, and
 approve Apple's VPN profile prompt. Add each home SSID in Settings so the tunnel
@@ -42,7 +51,8 @@ for split routing; unidentified Wi‑Fi stays untrusted.
 For deletion from the phone, run `sudo moorlan --unpair`, choose **Delete profile**
 in the app, scan the unpair QR on home Wi-Fi, and confirm. The app retains its
 profile if the server cannot acknowledge deletion. For a lost phone, run
-`sudo moorlan --remove <device-public-key>`. There is no offline delete queue.
+`sudo moorlan --remove-peer <device-public-key>`.
+There is no offline delete queue.
 
 WireGuardKit handles encryption, packet routing and native configuration. Apple's
 AVFoundation, Network, NetworkExtension, CoreLocation and Keychain APIs handle
@@ -63,25 +73,22 @@ capabilities, network prerequisites, and build steps.
 
 ## LIMITATIONS
 
-This MVP targets one conventional Linux/wg-quick home server with a single private
+This MVP targets one conventional Linux WireGuard home server with a single private
 IPv4 tunnel subnet (`/16`–`/30`, normally `/24`) and individual phone addresses.
 The home LAN must use a different subnet. There is no pool override, IPv6
 provisioning, general site-to-site management, CGNAT relay, automatic NAT setup,
 or offline deletion. Pairing and unpair QRs use protocol version 1.
 
-SQLite stores assignments for every peer on the dedicated `moorlanN` device.
-The host owns the device configuration; Moorlan writes no peer configuration files.
-Run `--init` once to create the database, and `--rehydrate` after boot to restore
-live peers. All other modes require an existing database. One process per interface
-applies live updates without restarting WireGuard. Failed removals are finished
-by retry or rehydrate. Enrollment is open to trusted LAN users until the process
-stops. Back up the database and keep the host's device configuration.
+SQLite stores assignments per interface under `/var/lib/moorlan/<iface>.db`.
+Site settings are `/etc/moorlan/<iface>.conf`. The host owns the device; Moorlan
+owns all peers on it after `--add-interface`. Put the release binary at
+`/usr/local/bin/moorlan`; use `--add-interface` / `--remove-interface` for devices.
+`--add-interface` is greenfield only. A sticky `public-endpoint` (DDNS or static)
+is required.
+
+Do not change the WireGuard server private key under an existing peer DB, and do
+not restore a lost DB from scratch while phones still hold leases — re-pair or
+`--remove-peer` as needed.
 
 Native iPhone signing,
-privacy permissions and Wi-Fi identification are required for the corresponding
-features. Background auto-reconnect requires a known home SSID; overlapping home
-and away private networks cannot be reliably classified by subnet alone.
-
-See [server limitations](server/README.md#limitations) and
-[iOS limitations](ios/README.md#limitations) for the supported scope and recovery
-behavior. Unsupported layouts fail explicitly rather than being guessed.
+capabilities, and store distribution remain outside this repository.

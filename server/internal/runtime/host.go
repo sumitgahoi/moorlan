@@ -71,7 +71,7 @@ func discover(wgName, storePath, privateEndpoint, homeCIDRs, publicEndpoint stri
 	if err != nil {
 		return Host{}, err
 	}
-	if err := validateInterface(device, addrs, pairing); err != nil {
+	if err := validateInterface(device, addrs); err != nil {
 		return Host{}, err
 	}
 	if storePath == "" {
@@ -115,10 +115,11 @@ func discover(wgName, storePath, privateEndpoint, homeCIDRs, publicEndpoint stri
 	if err != nil {
 		return Host{}, err
 	}
-	if publicEndpoint != "" {
-		if _, _, err := payload.SplitEndpoint(publicEndpoint); err != nil {
-			return Host{}, err
-		}
+	if publicEndpoint == "" {
+		return Host{}, fmt.Errorf("public-endpoint required (DDNS or static host:port)")
+	}
+	if _, _, err := payload.SplitEndpoint(publicEndpoint); err != nil {
+		return Host{}, err
 	}
 	host.HomeCIDRs = cidrs
 	host.PairIP = pairIP
@@ -127,12 +128,11 @@ func discover(wgName, storePath, privateEndpoint, homeCIDRs, publicEndpoint stri
 	return host, nil
 }
 
-func validateInterface(device *wgtypes.Device, addresses []string, pairing bool) error {
+// validateInterface requires a usable WireGuard device. Rehydrate fails (and
+// systemd retries) until listen port and the private IPv4 pool are present.
+func validateInterface(device *wgtypes.Device, addresses []string) error {
 	if device.PublicKey == (wgtypes.Key{}) {
 		return fmt.Errorf("WireGuard has no configured key")
-	}
-	if !pairing {
-		return nil
 	}
 	if device.ListenPort == 0 {
 		return fmt.Errorf("WireGuard has no listening port")

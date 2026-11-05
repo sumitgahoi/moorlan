@@ -79,29 +79,29 @@ func TestHostLeaseHelpers(t *testing.T) {
 	}
 }
 
-func TestUnpairDiscoveryDoesNotRequirePoolOrListeningPort(t *testing.T) {
+func TestValidateInterfaceRequiresUsableDevice(t *testing.T) {
 	device := &wgtypes.Device{PublicKey: wgtypes.Key{1}}
-	if err := validateInterface(device, []string{"10.8.0.1/32"}, false); err != nil {
-		t.Fatal(err)
+	if err := validateInterface(device, []string{"10.8.0.1/24"}); err == nil {
+		t.Fatal("missing listen port accepted")
 	}
 	device.ListenPort = 51820
-	if err := validateInterface(device, []string{"10.8.0.1/32"}, true); err == nil {
-		t.Fatal("pairing must still require a pool")
+	if err := validateInterface(device, []string{"10.8.0.1/32"}); err == nil {
+		t.Fatal("missing pool prefix accepted")
+	}
+	if err := validateInterface(device, []string{"10.8.0.1/24"}); err != nil {
+		t.Fatal(err)
 	}
 	device.PublicKey = wgtypes.Key{}
-	if err := validateInterface(device, nil, false); err == nil {
-		t.Fatal("unpair needs an existing server identity")
+	if err := validateInterface(device, []string{"10.8.0.1/24"}); err == nil {
+		t.Fatal("missing server identity accepted")
 	}
 }
 
-func TestConventionalSetupRejectedBeforeEnrollment(t *testing.T) {
+func TestValidateInterfaceReservesRoutedRanges(t *testing.T) {
 	device := &wgtypes.Device{PublicKey: wgtypes.Key{1}, ListenPort: 51820}
 	_, broad, _ := net.ParseCIDR("10.8.0.0/25")
 	device.Peers = []wgtypes.Peer{{PublicKey: wgtypes.Key{2}, AllowedIPs: []net.IPNet{*broad}}}
-	if err := validateInterface(device, []string{"10.8.0.1/24"}, true); err != nil {
+	if err := validateInterface(device, []string{"10.8.0.1/24"}); err != nil {
 		t.Fatal("existing routed range should reserve addresses:", err)
-	}
-	if err := validateInterface(device, []string{"10.8.0.1/32"}, false); err != nil {
-		t.Fatal(err)
 	}
 }

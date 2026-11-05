@@ -276,13 +276,13 @@ func TestProcessLockRemainsHeldUntilReleased(t *testing.T) {
 	unlock()
 }
 
-func TestInterfaceNameMustBeMoorlanN(t *testing.T) {
-	for _, name := range []string{"", "wg0", "moorlan", "moorlanX", "home-wg", "../moorlan0"} {
+func TestInterfaceNameValidation(t *testing.T) {
+	for _, name := range []string{"", "1wg", "../wg0", "wg/0", "a.b", "thisnameiswaytoolong01"} {
 		if validInterfaceName(name) {
 			t.Fatalf("unsafe interface name %q", name)
 		}
 	}
-	for _, name := range []string{"moorlan0", "moorlan1", "moorlan99"} {
+	for _, name := range []string{"wg0", "wg1", "moorlan0", "home-wg"} {
 		if !validInterfaceName(name) {
 			t.Fatalf("valid name rejected: %s", name)
 		}

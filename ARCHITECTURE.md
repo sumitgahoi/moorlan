@@ -10,24 +10,30 @@ Go net reads LAN/interface addresses and MTU. wgctrl reads/configures the existi
 WireGuard interface. Pairing uses trusted-LAN HTTP and a version 1 QR containing
 the LAN URL and server public key. Request and response bodies are plaintext JSON.
 No invitation token or expiry; multiple devices can enroll until the admin stops
-the process. An explicit endpoint overrides STUN; there is no LAN-only public
-endpoint fallback.
+the process. A sticky `public-endpoint` (DDNS or static host:port) is required;
+there is no STUN and no LAN-only public endpoint fallback.
 
-The host owns the dedicated `moorlanN` device configuration, and Moorlan owns all
-peers on it. SQLite persists public-key/address assignments before they are applied.
+The host owns the WireGuard device configuration; after `--add-interface`, Moorlan
+owns all peers on it. Per-iface `/etc/moorlan/<iface>.conf` stores static site flags
+(private endpoint, home CIDRs, public endpoint); CLI flags override the file. Peers
+are never written there. SQLite persists public-key/address assignments before they are applied.
 The allocator picks the lowest free /32 within one private IPv4 subnet, reserving
 live peer ranges and committed assignments. No networkd or wg-quick peer file is
-written. `--init` exclusively creates a database for an empty device; all other
-modes require an existing initialized database. `--rehydrate` restores peers after
-boot and removes live peers absent from SQLite. Mutations also reconcile live state.
-A lifetime interface lock prevents another Moorlan process; one operation mutex
-serializes mutations. No interface restart is needed.
+written. `--add-interface` is greenfield: refuses existing conf, DB, or rehydrate
+unit, requires zero live peers, then creates all three. `--pair` and related modes
+require that site conf and DB. Boot `--rehydrate` is a oneshot that fails until the
+WG device is usable; systemd retries for about five minutes. Pair/unpair/remove-peer
+reconcile before work. A lifetime interface lock prevents another Moorlan process;
+one operation mutex serializes mutations. No interface restart is needed. The
+release ships static linux amd64/arm64 binaries plus `.sha256` digests; operators
+install to `/usr/local/bin/moorlan`. `--remove-interface` deletes conf, empty DB,
+and unit when no peers remain.
 
 Unpair deletes the assignment and journals the pending live removal in one database
 transaction. Rehydrate or retry finishes live removal before clearing the journal.
 The HMAC credential is derived from the WireGuard private key, not stored in SQLite.
-`--unpair` skips STUN and exposes DELETE only; its public QR is version 1.
-`--remove` deletes a managed peer by WireGuard public key without the
+`--unpair` exposes DELETE only; its public QR is version 1.
+`--remove-peer` deletes a managed peer by WireGuard public key without the
 phone. Pending removals retain the label so administrative retries can find them.
 Pairing stores the phone's device name as a label in SQLite; labels may repeat.
 

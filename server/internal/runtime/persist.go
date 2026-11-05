@@ -9,7 +9,8 @@ import (
 	"syscall"
 )
 
-var moorlanIface = regexp.MustCompile(`^moorlan[0-9]+$`)
+// Linux iface names: start with a letter, then alnum/_/- ; IFNAMSIZ-1 = 15.
+var ifaceName = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{0,14}$`)
 
 // LockInterface is held by main until process shutdown, so pairing and unpair
 // cannot race another Moorlan process on the same device.
@@ -23,12 +24,14 @@ func LockInterface(name string) (func(), error) {
 	return lockFile(filepath.Join("/run", "moorlan-"+name+".lock"))
 }
 
+// ValidateInterfaceName requires a path-safe Linux interface name.
+func ValidateInterfaceName(name string) error {
+	return validateInterfaceName(name)
+}
+
 func validateInterfaceName(name string) error {
-	if !moorlanIface.MatchString(name) {
-		return fmt.Errorf("WireGuard interface must be named moorlan0, moorlan1, … (got %q)", name)
-	}
-	if len(name) > 15 {
-		return fmt.Errorf("WireGuard interface name too long")
+	if !ifaceName.MatchString(name) {
+		return fmt.Errorf("invalid WireGuard interface name %q (use a Linux iface name such as wg0)", name)
 	}
 	return nil
 }
