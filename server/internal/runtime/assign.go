@@ -67,6 +67,11 @@ func countLivePeers(name string) (int, error) {
 
 func (a *Assigner) Close() error { return a.store.db.Close() }
 
+// List returns enrolled peers from SQLite (label, public key, address).
+func (a *Assigner) List(ctx context.Context) ([]iface.Peer, error) {
+	return a.store.list(ctx)
+}
+
 func (a *Assigner) client() (wireguardClient, error) {
 	if a.openClient != nil {
 		return a.openClient()

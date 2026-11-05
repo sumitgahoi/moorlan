@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"text/tabwriter"
 	"time"
 
 	"moorlan/internal/pair"
@@ -36,6 +37,7 @@ func run() error {
 	pairMode := fs.Bool("pair", false, "show pairing QR and accept enrollments")
 	unpair := fs.Bool("unpair", false, "show unpair QR and accept deletions")
 	removePeer := fs.String("remove-peer", "", "remove a managed peer by WireGuard public key and exit")
+	listPeers := fs.Bool("list-peers", false, "print enrolled peers (label, public key, address) and exit")
 	rehydrate := fs.Bool("rehydrate", false, "apply SQLite peers onto the live device and exit")
 	addIface := fs.String("add-interface", "", "add WireGuard iface: conf, DB, rehydrate unit")
 	removeIface := fs.String("remove-interface", "", "remove Moorlan conf, empty peer DB, and rehydrate unit; keep the host device")
@@ -59,7 +61,7 @@ func run() error {
 	}
 
 	modes := 0
-	for _, on := range []bool{*pairMode, *unpair, *rehydrate} {
+	for _, on := range []bool{*pairMode, *unpair, *rehydrate, *listPeers} {
 		if on {
 			modes++
 		}
@@ -75,7 +77,7 @@ func run() error {
 	}
 	if modes == 0 {
 		printUsage()
-		return fmt.Errorf("specify --pair, --unpair, --remove-peer, --add-interface, --remove-interface, or --rehydrate")
+		return fmt.Errorf("specify --pair, --unpair, --remove-peer, --list-peers, --add-interface, --remove-interface, or --rehydrate")
 	}
 	if modes > 1 {
 		return fmt.Errorf("use only one primary mode")
@@ -96,7 +98,7 @@ func run() error {
 		return err
 	}
 
-	if *pairMode || *unpair {
+	if *pairMode || *unpair || *listPeers {
 		if !settings.Exists(site.WG) {
 			hint := fmt.Sprintf("sudo moorlan --add-interface %s", site.WG)
 			if names, err := settings.ListIfaceNames(); err == nil && len(names) > 0 {
@@ -114,7 +116,7 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if *rehydrate || *removePeer != "" {
+	if *rehydrate || *removePeer != "" || *listPeers {
 		host, err := runtime.DiscoverDevice(site.WG, site.DB)
 		if err != nil {
 			return err
@@ -124,6 +126,9 @@ func run() error {
 			return err
 		}
 		defer assigner.Close()
+		if *listPeers {
+			return printPeers(ctx, assigner)
+		}
 		if err := assigner.Reconcile(ctx); err != nil {
 			return err
 		}
@@ -220,7 +225,7 @@ func printUsage() {
 	fmt.Fprint(os.Stderr, `Usage:
   moorlan --add-interface <iface>     # new conf + DB + rehydrate unit (greenfield)
   moorlan --remove-interface <iface>  # unit + conf + empty DB (refuses if peers remain)
-  moorlan --pair | --unpair | --remove-peer <pubkey> | --rehydrate
+  moorlan --pair | --unpair | --remove-peer <pubkey> | --list-peers | --rehydrate
 
 Install the release binary to /usr/local/bin/moorlan (see server/README.md).
 Site conf /etc/moorlan/<iface>.conf is NOT your wg-quick/networkd device file.
@@ -232,6 +237,27 @@ Peers live in SQLite. Default -wg is wg0 when only one name is needed.
   -home-cidrs          home IPv4 CIDR(s)
   -public-endpoint     public WireGuard DDNS or static host:port (required)
 `)
+}
+
+func printPeers(ctx context.Context, assigner *runtime.Assigner) error {
+	peers, err := assigner.List(ctx)
+	if err != nil {
+		return err
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "LABEL\tPUBLIC_KEY\tADDRESS")
+	for _, p := range peers {
+		label := p.Label
+		if label == "" {
+			label = "-"
+		}
+		addr := "-"
+		if len(p.AllowedIPs) > 0 {
+			addr = p.AllowedIPs[0]
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\n", label, p.PublicKey, addr)
+	}
+	return w.Flush()
 }
 
 func resolveSite(wg, db, privateEndpoint, homeCIDRs, publicEndpoint string, explicit map[string]bool) (settings.Site, error) {

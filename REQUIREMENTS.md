@@ -8,12 +8,15 @@
 ## Server
 
 - Pair with an existing Linux WireGuard device (any path-safe name, default `wg0`)
-  using trusted-LAN HTTP. Host owns the device; after `--add-interface`, Moorlan
-  owns all peers on it (device must have zero peers when first added).
+  using trusted-LAN HTTP. **Trusted home LAN only:** plaintext HTTP, no invite
+  token, no TLS; open enrollment while `--pair` runs is deliberate. Host owns
+  the device; after `--add-interface`, Moorlan owns all peers on it (device must
+  have zero peers when first added).
 - Version 1 pairing QR: LAN URL and server public key, no invitation token;
   plaintext JSON over trusted-LAN HTTP including the phone device name as a
   label (duplicates allowed). Multiple devices can enroll while the admin
-  leaves the process running.
+  leaves the process running. `--list-peers` prints label, public key, and
+  address for enrolled peers.
 - Sticky `public-endpoint` (DDNS or static host:port) is required; no STUN and
   no LAN-only public endpoint fallback.
 - One private IPv4 interface subnet (/16–/30), automatic /32 allocation from

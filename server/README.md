@@ -5,6 +5,16 @@ Moorlan stores peer assignments in SQLite and applies them live with wgctrl.
 It does **not** write networkd or wg-quick peer config. The [iPhone app](../ios/README.md)
 handles the client.
 
+## Trusted home LAN only
+
+**This tool targets a trusted home LAN.** Control traffic is plaintext HTTP on
+your private network. There is **no invitation token, no TLS, and no LAN
+authentication**. While `--pair` is running, **anyone who can reach
+`private-endpoint` can enroll**. Security is deliberately lax so setup stays
+simple for a household. Do not publish the pairing port, and do not leave
+`--pair` / `--unpair` running on guest or untrusted networks. Stop those modes
+when finished.
+
 ## Supported setup
 
 | Setting | Requirement / example |
@@ -68,6 +78,7 @@ To wipe Moorlan’s registration for an iface (peers must already be gone):
 ```bash
 sudo moorlan --pair                    # sole conf auto-picked; else default -wg wg0
 sudo moorlan --pair -wg wg1
+sudo moorlan --list-peers              # label, public key, address
 sudo moorlan --unpair -wg wg0
 sudo moorlan --remove-peer '<device-public-key>'
 ```
@@ -94,6 +105,7 @@ public-endpoint=vpn.example.com:51820
 | `--add-interface <iface>` | Greenfield: create conf + DB + rehydrate unit (refuses if any already exist; live peers must be zero) |
 | `--remove-interface <iface>` | Disable+delete unit, conf, and empty DB (refuses if peers remain) |
 | `--pair` / `--unpair` | Enrollment / unpair QR (reconcile first; require conf) |
+| `--list-peers` | Print enrolled peers: label, public key, address |
 | `--remove-peer <pubkey>` | Admin revoke by device public key (reconcile first) |
 | `--rehydrate` | Boot path: one attempt; fails until WG is usable; systemd retries |
 
@@ -118,14 +130,15 @@ reconcile SQLite to the live device before serving or mutating.
 
 ## Protocol and trust
 
-Version 1 pairing QR:
+See [Trusted home LAN only](#trusted-home-lan-only) above. Version 1 pairing QR:
 
 ```json
 {"v":1,"pair_url":"http://192.168.1.10:8756/v1/pair","server_public_key":"<server-key>"}
 ```
 
 No invitation token. **Anyone who can reach the service can enroll while it runs.**
-HTTP on the trusted LAN is intentional.
+Plaintext HTTP on the trusted LAN is intentional — not a production hardening
+gap to “fix” with TLS or invites for this threat model.
 
 ## Unpair
 

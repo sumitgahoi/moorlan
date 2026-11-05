@@ -8,6 +8,16 @@ This monorepo contains two independent applications:
 | `server/` | Linux Go pairing/unpair service | [Server README](server/README.md) |
 | `ios/` | iPhone app and Packet Tunnel extension using WireGuardKit | [iOS README](ios/README.md) |
 
+## Trusted home LAN only
+
+**Moorlan is for a trusted home LAN.** Pairing and unpair use plaintext HTTP on
+your private network with **no invitation token, no TLS, and no LAN
+authentication**. While `moorlan --pair` is running, **anyone who can reach the
+control address can enroll a device**. That is deliberate: security is lax by
+design so a household setup stays simple. Do not expose the pairing port to the
+Internet, untrusted VLANs, or guest Wi‑Fi. Stop `--pair` / `--unpair` when you
+are done.
+
 ## Quick start
 
 On the Linux server, bring up an empty WireGuard device (e.g. `wg0`), then:
@@ -50,7 +60,8 @@ for split routing; unidentified Wi‑Fi stays untrusted.
 
 For deletion from the phone, run `sudo moorlan --unpair`, choose **Delete profile**
 in the app, scan the unpair QR on home Wi-Fi, and confirm. The app retains its
-profile if the server cannot acknowledge deletion. For a lost phone, run
+profile if the server cannot acknowledge deletion. List enrolled devices with
+`sudo moorlan --list-peers`. For a lost phone, run
 `sudo moorlan --remove-peer <device-public-key>`.
 There is no offline delete queue.
 
