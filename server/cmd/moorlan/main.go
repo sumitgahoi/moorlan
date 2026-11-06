@@ -138,7 +138,6 @@ func run() error {
 		text, err = payload.MarshalUnpair(payload.UnpairCard{V: 1, Action: "unpair", ServerPublicKey: host.Snap.PublicKey, UnpairURL: controlURL})
 		handler = pair.NewUnpairOnly(assigner, idle.Touch)
 	} else {
-		fmt.Printf("public     %s\n", host.Endpoint)
 		text, err = payload.Marshal(payload.Card{V: 1, PairURL: controlURL, ServerPublicKey: host.Snap.PublicKey})
 		handler = pair.New(assigner, idle.Touch)
 	}
@@ -158,24 +157,8 @@ func run() error {
 		return fmt.Errorf("cannot listen on %s: %w", addr, err)
 	}
 	defer listener.Close()
-	fmt.Printf("interface  %s\ndatabase   %s\nprivate    %s\n", host.Snap.Name, host.StorePath, addr)
-	if len(host.HomeNetworks) > 0 {
-		fmt.Printf("home       %s\n", strings.Join(host.HomeNetworks, ","))
-	}
-	if len(host.DNSServers) > 0 {
-		fmt.Printf("dns        %s\n", strings.Join(host.DNSServers, ","))
-	}
-	if len(host.DNSSearch) > 0 {
-		fmt.Printf("dns-search %s\n", strings.Join(host.DNSSearch, ","))
-	}
-	fmt.Printf("service    %s\n", controlURL)
 	if err := qr.WriteANSI(os.Stdout, text); err != nil {
 		return err
-	}
-	if *unpair {
-		fmt.Printf("\nScan with an already-paired device on home Wi‑Fi to unpair.\nDeletion only; the device must provide its saved credential.\nStops after %s with no successful unpair (Ctrl-C sooner).\n", pair.DefaultIdle)
-	} else {
-		fmt.Printf("\nScan on the trusted home LAN to add devices.\nAnyone who can reach this service can enroll while it is running.\nStops after %s with no successful pair (Ctrl-C sooner).\n", pair.DefaultIdle)
 	}
 	errCh := make(chan error, 1)
 	go func() { errCh <- server.Serve(listener) }()
