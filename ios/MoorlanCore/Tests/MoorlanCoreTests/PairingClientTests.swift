@@ -51,11 +51,22 @@ final class PairingClientTests: XCTestCase {
         return Data()
     }
 
+    private func invite(_ action: String, control: String = "http://192.168.1.10:8756/v1/pair", spk: String? = nil) -> String {
+        var components = URLComponents()
+        components.scheme = "moorlan"
+        components.host = "v1"
+        components.path = "/\(action)"
+        components.queryItems = [
+            URLQueryItem(name: "url", value: control),
+            URLQueryItem(name: "spk", value: spk ?? key)
+        ]
+        return components.url!.absoluteString
+    }
+
     func testVersionOneQRAndLeaseFields() throws {
-        let card = try QRCard.parse("""
-        {"v":1,"pair_url":"http://192.168.1.10:8756/v1/pair","server_public_key":"\(key)"}
-        """)
+        let card = try QRCard.parse(invite("pair"))
         XCTAssertEqual(card.v, 1)
+        XCTAssertEqual(card.serverPublicKey, key)
         let lease = try JSONDecoder().decode(Lease.self, from: Data("""
         {"address":"10.8.0.2/32","tunnel_network":"10.8.0.0/24","home_networks":["192.168.1.0/24"],"dns_servers":["192.168.1.1"],"dns_search":["home.arpa"],"public_key":"\(key)","endpoint":"vpn.example:51820","persistent_keepalive":25,"unpair_token":"peer-secret"}
         """.utf8))
@@ -219,9 +230,7 @@ final class PairingClientTests: XCTestCase {
     }
 
     func testScannerDistinguishesUnpairFromPairing() throws {
-        let text = """
-        {"v":1,"action":"unpair","server_public_key":"\(key)","unpair_url":"http://192.168.1.22:9999/v1/pair"}
-        """
+        let text = invite("unpair", control: "http://192.168.1.22:9999/v1/pair")
         guard case .unpair(let card) = try ScannedCode.parse(text) else {
             return XCTFail("Unpair QR was treated as enrollment")
         }
@@ -229,19 +238,14 @@ final class PairingClientTests: XCTestCase {
         XCTAssertThrowsError(try QRCard.parse(text))
         XCTAssertThrowsError(try card.pairedServer(in: []))
         XCTAssertThrowsError(try card.pairedServer(in: [server(credential: nil)]))
-        let pairText = """
-        {"v":1,"pair_url":"http://192.168.1.10:8756/v1/pair","server_public_key":"\(key)"}
-        """
-        guard case .pair = try ScannedCode.parse(pairText) else {
+        guard case .pair = try ScannedCode.parse(invite("pair")) else {
             return XCTFail("Pairing QR stopped working")
         }
-        XCTAssertThrowsError(try ScannedCode.parse("{\"action\":\"unknown\"}"))
-        let oldUnpair = """
-        {"v":2,"action":"unpair","server_public_key":"\(key)","unpair_url":"http://192.168.1.22:9999/v1/pair"}
-        """
-        XCTAssertThrowsError(try ScannedCode.parse(oldUnpair)) { error in
-            XCTAssertTrue(error.localizedDescription.contains("version 2"))
-            XCTAssertTrue(error.localizedDescription.contains("version 1"))
+        XCTAssertThrowsError(try ScannedCode.parse("moorlan://v1/unknown?url=http://192.168.1.10:8756/v1/pair&spk=\(key)"))
+        XCTAssertThrowsError(try ScannedCode.parse("""
+        {"v":1,"pair_url":"http://192.168.1.10:8756/v1/pair","server_public_key":"\(key)"}
+        """)) { error in
+            XCTAssertTrue(error.localizedDescription.contains("Moorlan invite"))
         }
     }
 
@@ -271,14 +275,12 @@ final class PairingClientTests: XCTestCase {
         } catch { }
     }
 
-    func testOldServerQRExplainsUpgradeInsteadOfSilentlyDowngrading() {
+    func testLegacyJSONQRIsRejected() {
         let text = """
-        {"v":2,"pair_url":"http://192.168.1.10:8756/v1/pair","server_public_key":"\(key)"}
+        {"v":1,"pair_url":"http://192.168.1.10:8756/v1/pair","server_public_key":"\(key)"}
         """
         XCTAssertThrowsError(try ScannedCode.parse(text)) { error in
-            XCTAssertTrue(error.localizedDescription.contains("version 2"))
-            XCTAssertTrue(error.localizedDescription.contains("version 1"))
-            XCTAssertTrue(error.localizedDescription.contains("Rebuild and restart"))
+            XCTAssertTrue(error.localizedDescription.contains("Moorlan invite"))
         }
     }
 }

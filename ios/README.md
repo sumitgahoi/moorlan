@@ -1,8 +1,10 @@
-# Moorlan iPhone app
+# Moorlan iPhone / iPad app
 
-iOS 17+ app and Packet Tunnel for the [Moorlan Linux server](../server/README.md).
-WireGuardKit owns crypto and the tunnel adapter. Contract:
-[REQUIREMENTS.md](REQUIREMENTS.md). Design: [ARCHITECTURE.md](ARCHITECTURE.md).
+iOS 17+ app and Packet Tunnel for the [Moorlan Linux server](../server/README.md)
+(iPhone and iPad). A Mac client is planned with the same in-app JSON QR pair
+flow; it is not in this tree yet. WireGuardKit owns crypto and the tunnel
+adapter. Contract: [REQUIREMENTS.md](REQUIREMENTS.md). Design:
+[ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Build
 
@@ -27,43 +29,40 @@ Entitlements are wired via `project.yml`. Changing bundle IDs/groups means
 updating project settings, entitlements, Info.plist keychain entries, and
 `Shared/AppIdentity.swift` together.
 
-Validate on a **physical iPhone** (camera, Local Network, VPN, roaming). Device
-builds are the supported path.
+Validate on a **physical iPhone or iPad** (camera, Local Network, VPN, roaming).
+Device builds are the supported path.
 
 ## Pair
 
-1. On the server: empty WG device managed by Moorlan, then
-   `sudo moorlan --pair --interface wg0`.
-2. Join home Wi‑Fi; open Moorlan → scan the pair QR.
-3. Allow Camera, Local Network, and Add VPN Configuration when prompted.
-4. The app saves the lease and installs a distinct VPN profile for that host.
+1. On the server: WireGuard up and managed by Moorlan, then
+   `sudo moorlan --pair` (add `--interface` if the YAML lists more than one).
+2. Join home Wi‑Fi; open the **Camera** app and scan the QR (opens Moorlan).
+3. Allow Local Network and Add VPN Configuration when prompted.
+4. The app saves the lease, marks that Wi‑Fi **Off**, and installs a VPN profile.
+   The first tunnel becomes the on-demand **Default** automatically.
 
-Denial of Camera/Local Network keeps the scan retryable and offers Open Settings.
-See [REQUIREMENTS.md](REQUIREMENTS.md) §2 and §6.
+In-app scan is a fallback if Camera did not open the app. See
+[REQUIREMENTS.md](REQUIREMENTS.md) §2 and §6.
 
 ## Day to day
 
-- **Select a tunnel** from the home list (multi-host). Only the selected tunnel
-  auto-activates.
-- **Automatic** (default): Home → off; Trusted Wi‑Fi / cellular → subnet; other
-  Wi‑Fi → exit. Manual Exit / Split override Automatic except Home always stays
-  off.
-- Mark SSIDs as Home or Trusted in Settings (join the network first). New named
-  Wi‑Fi should prompt for a role.
+- **Off / Split / Full** on Home is temporary for the current network. Change
+  permanently in Settings.
+- **Default** tunnel (at most one) auto-connects when away from Off Wi‑Fi. After
+  pairing a second house, the app asks whether to make it the default.
 - **Unpair:** on the server run `sudo moorlan --unpair --interface wg0`; in the
-  app choose Delete profile, scan the unpair QR on Home Wi‑Fi. Only **HTTP 204**
-  clears the local profile. Other tunnels and the shared Keychain identity stay.
+  app scan the unpair QR while on an Off Wi‑Fi. Only **HTTP 204** clears the
+  local profile. Other tunnels and the shared Keychain identity stay.
 
 ## Networks
 
-| Network | Automatic default |
+| Network | Permanent default |
 | --- | --- |
-| Home SSID | Tunnel off (hairpin) |
-| Trusted Wi‑Fi | Subnet |
-| Cellular (trusted by default) | Subnet |
-| Other / unidentified Wi‑Fi | Exit |
+| Unmarked Wi‑Fi | Full |
+| Cellular | Split |
+| Wi‑Fi at pair time | Off (saved) |
 
-Home ≠ Trusted. DNS comes from the server lease only. Full matrix and UX rules:
+DNS comes from the server lease only. Full matrix and UX rules:
 [REQUIREMENTS.md](REQUIREMENTS.md) §5 and §8.
 
 ## Storage
@@ -71,6 +70,7 @@ Home ≠ Trusted. DNS comes from the server lease only. Full matrix and UX rules
 | Store | Holds |
 | --- | --- |
 | App host record | Lease including `unpair_token` |
+| App policy | Permanent Off/Split/Full map |
 | App Group | Extension profile — **no** token, **no** private key |
 | Keychain | One client WireGuard private key |
 | System | Per-host `NETunnelProviderManager` |
@@ -82,4 +82,4 @@ swift test --package-path ios/MoorlanCore
 ```
 
 Camera, privacy prompts, VPN signing, and roaming require a signed build on a
-physical iPhone.
+physical iPhone or iPad.

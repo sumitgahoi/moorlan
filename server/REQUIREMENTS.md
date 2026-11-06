@@ -129,13 +129,17 @@ There is no `--add-interface` or `--remove-interface`.
 
 ### Pair QR
 
-```json
-{"v":1,"pair_url":"http://<private-endpoint>/v1/pair","server_public_key":"<server-wg-public-key>"}
+Camera-openable custom URL (ANSI QR encodes this string):
+
+```
+moorlan://v1/pair?url=http%3A%2F%2F<private-endpoint>%2Fv1%2Fpair&spk=<server-wg-public-key>
 ```
 
-- `v` MUST be `1`.
-- `pair_url`: scheme `http`, path exactly `/v1/pair`, no userinfo/query/fragment.
-- No invitation token in the QR.
+- Host `v1`, path `/pair`.
+- `url`: control plane `http` URL, path exactly `/v1/pair`, no userinfo/query/fragment
+  (percent-encoded in the query).
+- `spk`: server WireGuard public key (same value returned as lease `public_key`).
+- No invitation token in the QR. Legacy JSON QR payloads are not supported.
 
 ### Enroll
 
@@ -164,13 +168,15 @@ There is no `--add-interface` or `--remove-interface`.
 
 ### Unpair QR
 
-```json
-{"v":1,"action":"unpair","server_public_key":"<server-wg-public-key>","unpair_url":"http://<private-endpoint>/v1/pair"}
+```
+moorlan://v1/unpair?url=http%3A%2F%2F<private-endpoint>%2Fv1%2Fpair&spk=<server-wg-public-key>
 ```
 
-- `server_public_key` identifies which saved phone profile to clear (stable host
-  identity). The phone’s public key is NOT in the QR.
-- Unpair credential MUST NOT appear in the QR.
+- Host `v1`, path `/unpair`.
+- `spk` identifies which saved phone profile to clear (stable host identity).
+  The phone’s public key is NOT in the QR.
+- Unpair credential MUST NOT appear in the QR. Legacy JSON QR payloads are not
+  supported.
 
 ### Unpair HTTP
 

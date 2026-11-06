@@ -13,6 +13,8 @@ public enum MoorlanError: LocalizedError, Equatable, Sendable {
     case vpnConfigurationFailed
     case wifiNameUnavailable
     case tunnelStopped
+    /// Packet tunnel came up but no WireGuard handshake arrived in time.
+    case handshakeFailed
     case storageFailed
     /// Server already removed the peer; local cleanup should proceed.
     case unpairAlreadyGone
@@ -31,6 +33,7 @@ public enum MoorlanError: LocalizedError, Equatable, Sendable {
         case .vpnConfigurationFailed: return "VPN configuration failed"
         case .wifiNameUnavailable: return "Wi‑Fi name unavailable"
         case .tunnelStopped: return "Tunnel stopped"
+        case .handshakeFailed: return "Handshake failed"
         case .storageFailed: return "Could not save pairing on this iPhone"
         case .unpairAlreadyGone: return "Peer already removed on server"
         }
@@ -179,6 +182,12 @@ public struct UserFacingError: Equatable, Sendable, Identifiable {
             return UserFacingError(
                 title: "Tunnel stopped",
                 message: "Moorlan is no longer connected. Tap Retry when you want to connect again.",
+                action: .retry
+            )
+        case .handshakeFailed:
+            return UserFacingError(
+                title: "Home didn’t pick up",
+                message: "We knocked, but the house didn’t open the door. Make sure Moorlan is running at home, then tap Retry.",
                 action: .retry
             )
         case .storageFailed:

@@ -1,56 +1,40 @@
 import SwiftUI
-import UIKit
 import MoorlanCore
 
+/// App-wide settings — permanent Off/Split/Full for cellular and Wi‑Fi.
 struct SettingsView: View {
     @EnvironmentObject private var tunnel: TunnelManager
     @Environment(\.dismiss) private var dismiss
-    @State private var showUnpairScanner = false
-    @State private var showForgetConfirm = false
     @State private var tipTitle = ""
     @State private var tipMessage = ""
     @State private var showTip = false
-    @State private var deviceLabelDraft = ""
+    @State private var dnsOverrideText = ""
+    @State private var dnsErrorMessage = ""
+    @State private var showDNSError = false
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("Device name", text: $deviceLabelDraft)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .onSubmit { commitDeviceLabel() }
-                        .onChange(of: deviceLabelDraft) { _, _ in
-                            commitDeviceLabel()
+                    Picker(selection: cellularBinding) {
+                        ForEach(NetworkRouting.allCases, id: \.self) { option in
+                            Text(MoorlanCopy.routingTitle(option)).tag(option)
                         }
-                } header: {
-                    sectionHeader(
-                        "This iPhone",
-                        tip: "Shown as the peer label on your Moorlan host (moorlan --list-peers). iOS hides the Settings device name from apps, so set it here. Re-pair to update an existing peer."
-                    )
-                }
-
-                Section {
-                    Picker("Away default", selection: modeBinding) {
-                        Text("Automatic").tag(TunnelPolicy.Mode.automatic)
-                        Text("Home access only").tag(TunnelPolicy.Mode.split)
-                        Text("Full protection").tag(TunnelPolicy.Mode.exit)
+                    } label: {
+                        Text("Routing")
                     }
-                    Toggle(isOn: cellularBinding) {
-                        Text("Treat cellular as trusted")
-                    }
+                    .disabled(tunnel.isUnpairing)
                 } header: {
-                    sectionHeader(
-                        "Routing",
-                        tip: "Automatic: Home keeps the tunnel off; Trusted Wi‑Fi and cellular use home access only; other Wi‑Fi uses full protection. Manual modes override Automatic except Home always disconnects. Away default and Trusted SSIDs are phone-wide (shared across tunnels). DNS comes from the server lease only."
-                    )
+                    sectionHeader(MoorlanCopy.cellularSection, tip: MoorlanCopy.routingTip)
+                } footer: {
+                    Text(MoorlanCopy.settingsCellularFooter)
                 }
 
                 Section {
                     if tunnel.currentNetworkID == nil {
                         Text(pathSummary).foregroundStyle(.secondary)
                         if case .wifi = tunnel.pathKind {
-                            Button("Allow Wi‑Fi identification") { tunnel.identifyWiFi() }
+                            Button(MoorlanCopy.allowWifiName) { tunnel.identifyWiFi() }
                         }
                     }
 
@@ -58,136 +42,61 @@ struct SettingsView: View {
                         networkRow(id)
                     }
                 } header: {
-                    sectionHeader(
-                        "Networks",
-                        tip: "Home is your house LAN — tunnel off. Trusted is a safe network that is not Home — home access only. Away / unmarked Wi‑Fi uses full protection in Automatic. Home and Trusted are different on purpose."
-                    )
+                    sectionHeader(MoorlanCopy.wifiSection, tip: MoorlanCopy.routingTip)
+                } footer: {
+                    Text(MoorlanCopy.settingsNetworksFooter)
                 }
 
-                if tunnel.servers.count > 1 {
-                    Section {
-                        ForEach(tunnel.servers) { server in
-                            Button {
-                                Task {
-                                    await tunnel.selectProfile(server.id)
-                                    await tunnel.applyDesiredState()
-                                }
-                            } label: {
-                                HStack {
-                                    Text(server.displayName)
-                                        .foregroundStyle(.primary)
-                                    Spacer()
-                                    if server.id == tunnel.selectedServer?.id {
-                                        Image(systemName: "checkmark")
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                            }
-                            .disabled(tunnel.isUnpairing)
-                        }
-                    } header: {
-                        sectionHeader(
-                            "Tunnels",
-                            tip: "Only the selected tunnel auto-activates. Pairing another host adds a tunnel; it does not remove existing ones."
-                        )
-                    }
-                }
-
-                if let server = tunnel.selectedServer {
-                    Section {
-                        LabeledContent("Host", value: server.displayName)
-                        DisclosureGroup("Server lease") {
-                            LabeledContent("Client IP", value: server.lease.address)
-                            LabeledContent("Endpoint", value: server.lease.endpoint ?? "—")
-                            LabeledContent("Tunnel network", value: server.lease.tunnelNetwork)
-                            LabeledContent("Home networks", value: server.homeNetworksDescription)
-                            LabeledContent("DNS", value: server.serverDNSDescription)
-                            LabeledContent("Search domains", value: server.serverDNSSearchDescription)
-                            LabeledContent("Keepalive", value: "\(server.lease.persistentKeepalive ?? 25)s")
-                            if let mtu = server.lease.mtu {
-                                LabeledContent("MTU", value: "\(mtu)")
-                            }
-                            LabeledContent("Public key", value: String(server.publicKey.prefix(20)) + "…")
-                        }
-                        Button(tunnel.isUnpairing ? "Deleting…" : "Unpair with QR", role: .destructive) {
-                            showUnpairScanner = true
-                        }
+                Section {
+                    TextField(dnsPlaceholder, text: $dnsOverrideText)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.numbersAndPunctuation)
                         .disabled(tunnel.isUnpairing)
-                        Button("Remove from this iPhone", role: .destructive) {
-                            showForgetConfirm = true
-                        }
-                        .disabled(tunnel.isUnpairing)
-                    } header: {
-                        sectionHeader(
-                            "Paired host",
-                            tip: "Read-only lease from the server. Prefer Unpair with QR on Home Wi‑Fi so the host deletes the peer. Remove from this iPhone only clears local VPN settings if the server already unpaired or cleanup got stuck."
-                        )
-                    }
+                        .onSubmit { commitDNSOverride() }
+                } header: {
+                    Text(MoorlanCopy.dnsTempHeader)
+                } footer: {
+                    Text(MoorlanCopy.dnsTempFooter)
                 }
             }
-            .navigationTitle("Settings")
+            .navigationTitle(MoorlanCopy.settingsTitle)
             .navigationBarTitleDisplayMode(.inline)
             .interactiveDismissDisabled(tunnel.isUnpairing)
-            .sheet(isPresented: $showUnpairScanner) {
-                ScannerSheet()
-                    .environmentObject(tunnel)
-            }
+            .onAppear { dnsOverrideText = dnsOverrideDisplay }
             .alert(tipTitle, isPresented: $showTip) {
                 Button("OK", role: .cancel) {}
             } message: {
                 Text(tipMessage)
             }
-            .confirmationDialog(
-                "Remove \(tunnel.selectedServer?.displayName ?? "this host") from this iPhone?",
-                isPresented: $showForgetConfirm,
-                titleVisibility: .visible
-            ) {
-                Button("Remove from this iPhone", role: .destructive) {
-                    guard let server = tunnel.selectedServer else { return }
-                    Task {
-                        await tunnel.forgetLocalHost(server)
-                        if tunnel.servers.isEmpty { dismiss() }
-                    }
-                }
-                Button("Cancel", role: .cancel) {}
+            .alert(MoorlanCopy.dnsTempInvalidTitle, isPresented: $showDNSError) {
+                Button("OK", role: .cancel) {}
             } message: {
-                Text("Deletes the local VPN profile only. If the Moorlan host still has this peer, run moorlan --unpair there or re-pair later.")
+                Text(dnsErrorMessage)
             }
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
-                        commitDeviceLabel()
-                        dismiss()
+                        if commitDNSOverride() { dismiss() }
                     }
                     .disabled(tunnel.isUnpairing)
                 }
             }
-            .onAppear {
-                deviceLabelDraft = tunnel.deviceLabel
-            }
-        }
-    }
-
-    private func commitDeviceLabel() {
-        let trimmed = deviceLabelDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed != tunnel.deviceLabel {
-            tunnel.deviceLabel = trimmed.isEmpty ? UIDevice.current.name : trimmed
-            deviceLabelDraft = tunnel.deviceLabel
         }
     }
 
     private func networkRow(_ id: String) -> some View {
-        let role = tunnel.networkRole(for: id)
+        let routing = tunnel.permanentRouting(forNetworkID: id)
         let isCurrent = id == tunnel.currentNetworkID
         return Menu {
-            ForEach(TunnelManager.NetworkRole.allCases, id: \.self) { option in
+            ForEach(NetworkRouting.allCases, id: \.self) { option in
                 Button {
-                    tunnel.setNetworkRole(option, for: id)
+                    tunnel.setPermanentRouting(option, forNetworkID: id)
                 } label: {
-                    if option == role {
-                        Label(roleTitle(option), systemImage: "checkmark")
+                    if option == routing {
+                        Label(MoorlanCopy.routingTitle(option), systemImage: "checkmark")
                     } else {
-                        Text(roleTitle(option))
+                        Text(MoorlanCopy.routingTitle(option))
                     }
                 }
             }
@@ -198,7 +107,7 @@ struct SettingsView: View {
                         Text(tunnel.displayNetworkName(id))
                             .foregroundStyle(.primary)
                         if isCurrent {
-                            Text("Current")
+                            Text(MoorlanCopy.hereNow)
                                 .font(.caption2.weight(.semibold))
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 2)
@@ -206,7 +115,7 @@ struct SettingsView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
-                    Text(roleSubtitle(role))
+                    Text(MoorlanCopy.routingSubtitle(routing))
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -218,7 +127,7 @@ struct SettingsView: View {
         }
         .disabled(tunnel.isUnpairing)
         .accessibilityLabel(tunnel.displayNetworkName(id))
-        .accessibilityValue(roleTitle(role))
+        .accessibilityValue(MoorlanCopy.routingTitle(routing))
     }
 
     private func sectionHeader(_ title: String, tip: String) -> some View {
@@ -237,41 +146,46 @@ struct SettingsView: View {
         }
     }
 
-    private func roleTitle(_ role: TunnelManager.NetworkRole) -> String {
-        switch role {
-        case .home: return "Home"
-        case .trusted: return "Trusted"
-        case .away: return "Away"
-        }
-    }
-
-    private func roleSubtitle(_ role: TunnelManager.NetworkRole) -> String {
-        switch role {
-        case .home: return "Home · tunnel off"
-        case .trusted: return "Trusted · home access only"
-        case .away: return "Away · full protection"
-        }
-    }
-
-    private var modeBinding: Binding<TunnelPolicy.Mode> {
-        Binding(get: { tunnel.policy.mode }, set: { tunnel.policy.mode = $0; tunnel.savePolicy() })
-    }
-
-    private var cellularBinding: Binding<Bool> {
+    private var cellularBinding: Binding<NetworkRouting> {
         Binding(
-            get: { tunnel.policy.treatCellularAsTrusted },
-            set: {
-                tunnel.policy.treatCellularAsTrusted = $0
-                tunnel.savePolicy()
-            }
+            get: { tunnel.policy.cellularRouting },
+            set: { tunnel.setPermanentCellularRouting($0) }
         )
     }
 
     private var pathSummary: String {
         switch tunnel.pathKind {
-        case .cellular: return "On cellular"
-        case .wifi: return "On Wi‑Fi — allow identification to name this network"
-        case .other: return "No Wi‑Fi identity yet"
+        case .cellular: return MoorlanCopy.onCellular
+        case .wifi: return MoorlanCopy.onWifiNeedName
+        case .other: return MoorlanCopy.noWifiYet
         }
+    }
+
+    private var dnsOverrideDisplay: String {
+        (tunnel.policy.dnsOverride ?? []).joined(separator: ", ")
+    }
+
+    private var dnsPlaceholder: String {
+        let lease = tunnel.selectedServer?.lease.dnsServers
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty } ?? []
+        if lease.isEmpty { return MoorlanCopy.dnsTempPlaceholder }
+        return lease.joined(separator: ", ")
+    }
+
+    @discardableResult
+    private func commitDNSOverride() -> Bool {
+        let parsed = TunnelPolicy.parseDNSOverride(dnsOverrideText)
+        if let error = parsed.error {
+            dnsErrorMessage = error
+            showDNSError = true
+            return false
+        }
+        let next = parsed.servers
+        if next != tunnel.policy.dnsOverride {
+            tunnel.policy.dnsOverride = next
+            tunnel.savePolicyAndRestartTunnel()
+        }
+        return true
     }
 }

@@ -22,8 +22,12 @@ curl -fsSL https://github.com/sumitgahoi/moorlan/releases/latest/download/instal
 sudoedit /etc/moorlan/moorlan.yaml
 ```
 
-Edit `private-endpoint`, `public-endpoint`, `home-networks`, and DNS to match
-your LAN (see Site conf / Notes). Then pair phones under Day to day.
+The example is commented out so installation cannot claim an existing interface.
+Uncomment the settings and replace the interface name, `private-endpoint`,
+`public-endpoint`, `home-networks`, and DNS to match your LAN (see Site conf /
+Notes). Reconciliation will fail safely until the YAML is configured. On a
+configured interface, it removes live peers absent from Moorlan's database.
+Then pair phones under Day to day.
 
 If `moorlan-reconcile.service` failed before WireGuard or YAML were ready:
 
@@ -39,8 +43,17 @@ sudo systemctl reset-failed moorlan-reconcile.service && sudo systemctl start mo
 curl -fsSL https://github.com/sumitgahoi/moorlan/releases/latest/download/uninstall.sh | sudo bash
 ```
 
-Removes the binary, unit, site YAML, and peer DB. Leaves the WireGuard device
-alone.
+Removes the binary, unit, and example files; preserves configuration and the peer
+DB. To also delete all Moorlan configuration, database files (including SQLite
+sidecars), runtime locks, and systemd overrides, close any running pairing/unpairing
+sessions and use `--purge`:
+
+```bash
+curl -fsSL https://github.com/sumitgahoi/moorlan/releases/latest/download/uninstall.sh | sudo bash -s -- --purge
+```
+
+Both modes leave WireGuard devices and their host configuration alone. Historical
+entries in the shared system journal are retained.
 
 ## Trusted home LAN only
 
@@ -59,9 +72,9 @@ sudo moorlan --remove --interface wg0 --peer-public-key '<device-public-key>'
 sudo moorlan --reconcile
 ```
 
-`--pair` / `--unpair` print only a QR on stdout and stay up for more devices
-until idle or Ctrl-C. Successful enroll/unpair lines appear on stderr. Confirm
-peers with `--list-peers`.
+`--pair` / `--unpair` print only a QR on stdout (`moorlan://…` invite for the
+system Camera app) and stay up for more devices until idle or Ctrl-C. Successful
+enroll/unpair lines appear on stderr. Confirm peers with `--list-peers`.
 
 | Command | Role |
 | --- | --- |

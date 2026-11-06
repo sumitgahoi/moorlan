@@ -6,23 +6,15 @@ struct EmptyPairingView: View {
     var body: some View {
         NavigationStack {
             ContentUnavailableView {
-                Label("Pair with your home", systemImage: "qrcode.viewfinder")
+                Label(MoorlanCopy.emptyTitle, systemImage: "qrcode.viewfinder")
             } description: {
-                Text("Scan the QR from your Moorlan host while on home Wi‑Fi.")
+                Text(MoorlanCopy.emptyBody)
             } actions: {
-                Button {
-                    onScan()
-                } label: {
-                    Text("Scan to pair")
-                        .font(.body.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 4)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .padding(.horizontal, 48)
+                Button(MoorlanCopy.emptyButton, action: onScan)
+                    .buttonStyle(.borderedProminent)
+                    .accessibilityHint("Uses Moorlan’s camera instead of the system Camera app")
             }
-            .navigationTitle("Moorlan")
+            .navigationBarTitleDisplayMode(.inline)
         }
     }
 }

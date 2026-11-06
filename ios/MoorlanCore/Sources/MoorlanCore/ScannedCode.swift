@@ -21,6 +21,16 @@ public struct UnpairCard: Codable, Equatable, Sendable {
         self.unpairURL = unpairURL
     }
 
+    public static func parse(_ text: String) throws -> UnpairCard {
+        let invite = try InviteURL.parse(text)
+        guard invite.action == .unpair else {
+            throw MoorlanError.invalidCard("not an unpair invite")
+        }
+        let card = UnpairCard(serverPublicKey: invite.serverPublicKey, unpairURL: invite.controlURL)
+        try card.validate()
+        return card
+    }
+
     public func validate() throws {
         guard v == 1 else {
             throw MoorlanError.invalidCard("Unpair QR version \(v) is unsupported; this app supports version 1. Rebuild and restart the Linux server using the latest server/ code, then scan its new QR.")
@@ -53,18 +63,12 @@ public enum ScannedCode: Equatable, Sendable {
     case unpair(UnpairCard)
 
     public static func parse(_ text: String) throws -> ScannedCode {
-        struct Header: Decodable { var action: String? }
-        let data = Data(text.utf8)
-        let header = try JSONDecoder().decode(Header.self, from: data)
-        switch header.action {
-        case nil, "pair":
+        let invite = try InviteURL.parse(text)
+        switch invite.action {
+        case .pair:
             return .pair(try QRCard.parse(text))
-        case "unpair":
-            let card = try JSONDecoder().decode(UnpairCard.self, from: data)
-            try card.validate()
-            return .unpair(card)
-        default:
-            throw MoorlanError.invalidCard("unsupported action")
+        case .unpair:
+            return .unpair(try UnpairCard.parse(text))
         }
     }
 }

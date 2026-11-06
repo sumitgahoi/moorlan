@@ -1,23 +1,27 @@
+# Configuration is disabled by default. Uncomment the settings below and replace
+# the interface name and values before starting Moorlan.
+# Reconciliation removes live peers that are absent from the Moorlan database.
+
 # Devices reach this to pair/unpair — LAN address inside home-networks below
-private-endpoint: 10.10.10.1:8756
+# private-endpoint: 10.10.10.1:8756
 
-interfaces:
-  wg0:
-    # Externally reachable WG host:port
-    public-endpoint: vpn.example.com:51820
+# interfaces:
+#   wg0:
+#     # Externally reachable WG host:port
+#     public-endpoint: vpn.example.com:51820
 
-    # Subnets to reach your LAN when away
-    home-networks:
-      - 10.10.0.0/24
-      - 10.10.10.0/24
-      - 10.10.20.0/24
-      - 10.10.30.0/24
-      - 10.10.40.0/24
+#     # Subnets to reach your LAN when away
+#     home-networks:
+#       - 10.10.0.0/24
+#       - 10.10.10.0/24
+#       - 10.10.20.0/24
+#       - 10.10.30.0/24
+#       - 10.10.40.0/24
 
-    # Example: this host's WireGuard tunnel address (not a separate LAN DNS box)
-    dns-servers:
-      - 10.10.83.1
+#     # Example: this host's WireGuard tunnel address (not a separate LAN DNS box)
+#     dns-servers:
+#       - 10.10.83.1
 
-    # Optional; carbon → carbon.home.arpa
-    dns-search:
-      - home.arpa
+#     # Optional; carbon → carbon.home.arpa
+#     dns-search:
+#       - home.arpa

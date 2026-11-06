@@ -36,14 +36,38 @@ public struct ServerStore {
 
     public func loadPolicy() -> TunnelPolicy {
         guard let data = defaults.data(forKey: policyKey) else { return TunnelPolicy() }
-        if let current = try? JSONDecoder().decode(TunnelPolicy.self, from: data) { return current }
-        if let old = try? JSONDecoder().decode(LegacyPolicy.self, from: data) {
-            return TunnelPolicy(mode: old.exitNodeEnabled ? .exit : .automatic,
-                trustedNetworkIDs: Set(old.trustedNetworkIDs.filter { $0.hasPrefix("ssid:") }),
-                treatCellularAsTrusted: old.treatCellularAsTrusted)
+        if let current = try? JSONDecoder().decode(TunnelPolicy.self, from: data) {
+            return current
         }
-        // Corrupt policy blob: fall back to defaults rather than wiping trusted SSIDs silently mid-session.
+        if let old = try? JSONDecoder().decode(LegacyPolicy.self, from: data) {
+            var routing: [String: NetworkRouting] = [:]
+            for id in old.trustedNetworkIDs where id.hasPrefix("ssid:") {
+                routing[id] = .split
+            }
+            return TunnelPolicy(
+                networkRouting: routing,
+                cellularRouting: old.treatCellularAsTrusted ? .split : .full
+            )
+        }
+        // Corrupt policy blob: fall back to defaults rather than wiping routing mid-session.
         return TunnelPolicy()
+    }
+
+    /// Fold legacy per-server `homeSSIDs` into permanent Off and clear them on servers.
+    public func migrateLegacyHomeSSIDs(policy: inout TunnelPolicy, servers: inout [PairedServer]) throws -> Bool {
+        var changed = false
+        for i in servers.indices {
+            let homes = servers[i].homeSSIDs
+            guard !homes.isEmpty else { continue }
+            policy.applyLegacyHomeSSIDs(homes)
+            servers[i].homeSSIDs = []
+            changed = true
+        }
+        if changed {
+            try savePolicy(policy)
+            try saveServers(servers)
+        }
+        return changed
     }
 
     public func savePolicy(_ policy: TunnelPolicy) throws {

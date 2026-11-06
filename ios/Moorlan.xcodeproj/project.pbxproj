@@ -11,13 +11,17 @@
 		0AF475AC7D1E66819BB6DCC9 /* MoorlanApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 059A0BCEE175CFDB16E228D2 /* MoorlanApp.swift */; };
 		0D6E17339DC919FA9655CD1F /* ScannerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 927E98A1CB2BAD5029341EA4 /* ScannerSheet.swift */; };
 		11909FA21FDC257F18198468 /* WiFiIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB4FA0606C1213E683370B7A /* WiFiIdentity.swift */; };
+		15BE186FA76C25BAD9358016 /* MoorlanTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EE33013FCAB15DC6A3EF290 /* MoorlanTheme.swift */; };
 		1AD0C874B53B9517D4F285B0 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = DFAEA05CC56709EDEBE419B0 /* Assets.xcassets */; };
 		2812BDE7F8784B7312C42CD9 /* ConnectionDiagramView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16435B4161A033C8F1BDB2C9 /* ConnectionDiagramView.swift */; };
 		2BF667F87D2D50507B1DB21D /* MoorlanCore in Frameworks */ = {isa = PBXBuildFile; productRef = 7AA63E122F8FC16D75D37858 /* MoorlanCore */; };
 		3C5FF91BC2AC73B99649503F /* WireGuardProfileBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D44DABE92EC65365EB9EBA2 /* WireGuardProfileBuilder.swift */; };
 		464523A4552483DCADE253A5 /* EmptyPairingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56856E25F169EAC01DFBE7E1 /* EmptyPairingView.swift */; };
+		4740EF6B651E6FE333499F20 /* ThemeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4ABC1347106F2C3B5EC6E4E7 /* ThemeStore.swift */; };
 		4DAEF986F2EBC00F9FEAFB66 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F6241D5FB94DB4189AF8A3A /* RootView.swift */; };
 		51DF22839D24399C982B6E4B /* AppIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = C80F8D0E668C80CB47D6F320 /* AppIdentity.swift */; };
+		57C8E8F50ED634A56F0B3EBE /* ThemeChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2F16C5BEF50E1293713E959 /* ThemeChrome.swift */; };
+		77BCFF44F884CA4CC6F3270C /* MoorlanCopy.swift in Sources */ = {isa = PBXBuildFile; fileRef = E93AB2A2B83CDEC6732E2399 /* MoorlanCopy.swift */; };
 		79AC1D8E8008A537F9437017 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E00EF2632F4EEEEA70010AEF /* SettingsView.swift */; };
 		8060BFE4C866E9EAA06871E9 /* MoorlanCore in Frameworks */ = {isa = PBXBuildFile; productRef = 4F1B3E68D6F90EBA4768D7F1 /* MoorlanCore */; };
 		8B2DE4BE275F71079CA00DFF /* LocalNetworkAuthorization.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9490B66EE95FE4F7CA598AA4 /* LocalNetworkAuthorization.swift */; };
@@ -26,7 +30,9 @@
 		CBC7B93110C12B4BD006D8B6 /* AppIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = C80F8D0E668C80CB47D6F320 /* AppIdentity.swift */; };
 		CBCB43E779FCAB8D69CDDF2F /* PacketTunnel.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 94FD78BE59569680E3923D50 /* PacketTunnel.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		D0B7D617CE4F55B70E58600C /* WireGuardKit in Frameworks */ = {isa = PBXBuildFile; productRef = C76B551ACF97D202D1CDA971 /* WireGuardKit */; };
+		D3DB1796B377E86B30509898 /* ThemeEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A9F9A8904ED301002028D39 /* ThemeEnvironment.swift */; };
 		E24FF04E5B07736C61F8FC35 /* WireGuardProfileBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D44DABE92EC65365EB9EBA2 /* WireGuardProfileBuilder.swift */; };
+		E3EB2846EB6F1DF3204FC521 /* TunnelDetailsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4466F87A609FD4E9A2D97863 /* TunnelDetailsSheet.swift */; };
 		ED8325F271C6C039BD82BC60 /* WireGuardKit in Frameworks */ = {isa = PBXBuildFile; productRef = 10E7711CCB59347AB4DA3C14 /* WireGuardKit */; };
 /* End PBXBuildFile section */
 
@@ -67,15 +73,20 @@
 		16C3CEA93B96777FD8406F78 /* wireguard-apple */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "wireguard-apple"; path = "Vendor/wireguard-apple"; sourceTree = SOURCE_ROOT; };
 		2FF5CA8C286912565D4D2B5A /* PacketTunnelProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PacketTunnelProvider.swift; sourceTree = "<group>"; };
 		435081AE7AF90DFAFB0F30CD /* PacketTunnel.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PacketTunnel.entitlements; sourceTree = "<group>"; };
+		4466F87A609FD4E9A2D97863 /* TunnelDetailsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TunnelDetailsSheet.swift; sourceTree = "<group>"; };
 		4873F05F0A090D4EDD8313EB /* TunnelManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TunnelManager.swift; sourceTree = "<group>"; };
+		4ABC1347106F2C3B5EC6E4E7 /* ThemeStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeStore.swift; sourceTree = "<group>"; };
 		4D44DABE92EC65365EB9EBA2 /* WireGuardProfileBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WireGuardProfileBuilder.swift; sourceTree = "<group>"; };
 		56856E25F169EAC01DFBE7E1 /* EmptyPairingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyPairingView.swift; sourceTree = "<group>"; };
+		5EE33013FCAB15DC6A3EF290 /* MoorlanTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoorlanTheme.swift; sourceTree = "<group>"; };
 		788C047941F1E6786D5CBFE7 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		7A9F9A8904ED301002028D39 /* ThemeEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeEnvironment.swift; sourceTree = "<group>"; };
 		927E98A1CB2BAD5029341EA4 /* ScannerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScannerSheet.swift; sourceTree = "<group>"; };
 		9490B66EE95FE4F7CA598AA4 /* LocalNetworkAuthorization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalNetworkAuthorization.swift; sourceTree = "<group>"; };
 		94FD78BE59569680E3923D50 /* PacketTunnel.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = PacketTunnel.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		9F6241D5FB94DB4189AF8A3A /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		A62A972449AE2E2E7654EFC0 /* Moorlan.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Moorlan.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B2F16C5BEF50E1293713E959 /* ThemeChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeChrome.swift; sourceTree = "<group>"; };
 		C78FB1B62ACA07DB85F22C0A /* Moorlan.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Moorlan.entitlements; sourceTree = "<group>"; };
 		C80F8D0E668C80CB47D6F320 /* AppIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIdentity.swift; sourceTree = "<group>"; };
 		CAE55EF2ED41A8CAB35AE3B4 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -83,6 +94,7 @@
 		DDD9E60C864FCFC32AD9FE47 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		DFAEA05CC56709EDEBE419B0 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		E00EF2632F4EEEEA70010AEF /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		E93AB2A2B83CDEC6732E2399 /* MoorlanCopy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoorlanCopy.swift; sourceTree = "<group>"; };
 		FB4FA0606C1213E683370B7A /* WiFiIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WiFiIdentity.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -120,6 +132,7 @@
 		046696F7706FD2F324349BF8 /* Moorlan */ = {
 			isa = PBXGroup;
 			children = (
+				87AEDBE0519B33334F445754 /* Design */,
 				DFAEA05CC56709EDEBE419B0 /* Assets.xcassets */,
 				16435B4161A033C8F1BDB2C9 /* ConnectionDiagramView.swift */,
 				56856E25F169EAC01DFBE7E1 /* EmptyPairingView.swift */,
@@ -131,6 +144,7 @@
 				9F6241D5FB94DB4189AF8A3A /* RootView.swift */,
 				927E98A1CB2BAD5029341EA4 /* ScannerSheet.swift */,
 				E00EF2632F4EEEEA70010AEF /* SettingsView.swift */,
+				4466F87A609FD4E9A2D97863 /* TunnelDetailsSheet.swift */,
 				4873F05F0A090D4EDD8313EB /* TunnelManager.swift */,
 				FB4FA0606C1213E683370B7A /* WiFiIdentity.swift */,
 			);
@@ -174,6 +188,18 @@
 				012A8A93A2264953BBEC81BA /* Shared */,
 				251F307E4297C75CB378C8EE /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		87AEDBE0519B33334F445754 /* Design */ = {
+			isa = PBXGroup;
+			children = (
+				E93AB2A2B83CDEC6732E2399 /* MoorlanCopy.swift */,
+				5EE33013FCAB15DC6A3EF290 /* MoorlanTheme.swift */,
+				B2F16C5BEF50E1293713E959 /* ThemeChrome.swift */,
+				7A9F9A8904ED301002028D39 /* ThemeEnvironment.swift */,
+				4ABC1347106F2C3B5EC6E4E7 /* ThemeStore.swift */,
+			);
+			path = Design;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -311,9 +337,15 @@
 				8CA4E20467690C4773C0BF54 /* HomeView.swift in Sources */,
 				8B2DE4BE275F71079CA00DFF /* LocalNetworkAuthorization.swift in Sources */,
 				0AF475AC7D1E66819BB6DCC9 /* MoorlanApp.swift in Sources */,
+				77BCFF44F884CA4CC6F3270C /* MoorlanCopy.swift in Sources */,
+				15BE186FA76C25BAD9358016 /* MoorlanTheme.swift in Sources */,
 				4DAEF986F2EBC00F9FEAFB66 /* RootView.swift in Sources */,
 				0D6E17339DC919FA9655CD1F /* ScannerSheet.swift in Sources */,
 				79AC1D8E8008A537F9437017 /* SettingsView.swift in Sources */,
+				57C8E8F50ED634A56F0B3EBE /* ThemeChrome.swift in Sources */,
+				D3DB1796B377E86B30509898 /* ThemeEnvironment.swift in Sources */,
+				4740EF6B651E6FE333499F20 /* ThemeStore.swift in Sources */,
+				E3EB2846EB6F1DF3204FC521 /* TunnelDetailsSheet.swift in Sources */,
 				8CE219DCEB2CB92AA2AF9046 /* TunnelManager.swift in Sources */,
 				11909FA21FDC257F18198468 /* WiFiIdentity.swift in Sources */,
 				3C5FF91BC2AC73B99649503F /* WireGuardProfileBuilder.swift in Sources */,
@@ -401,7 +433,7 @@
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 1;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
 		};
@@ -467,7 +499,7 @@
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 1;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
 		};

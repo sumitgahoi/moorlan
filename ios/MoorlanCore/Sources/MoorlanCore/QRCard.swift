@@ -1,6 +1,8 @@
 import Foundation
 
 /// A version 1 server locator. VPN settings arrive in the pairing response.
+/// Live QR / Camera invites use `moorlan://v1/pair?url=…&spk=…`. App storage
+/// still persists this struct as JSON (`pair_url`, `server_public_key`).
 public struct QRCard: Codable, Equatable, Sendable {
     public var v: Int
     public var pairURL: URL
@@ -27,7 +29,11 @@ public struct QRCard: Codable, Equatable, Sendable {
     }
 
     public static func parse(_ text: String) throws -> QRCard {
-        let card = try JSONDecoder().decode(QRCard.self, from: Data(text.utf8))
+        let invite = try InviteURL.parse(text)
+        guard invite.action == .pair else {
+            throw MoorlanError.invalidCard("not a pair invite")
+        }
+        let card = QRCard(v: 1, pairURL: invite.controlURL, serverPublicKey: invite.serverPublicKey)
         try card.validate()
         return card
     }

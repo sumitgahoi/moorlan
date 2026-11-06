@@ -19,62 +19,53 @@ final class TunnelPolicyTests: XCTestCase {
         )
     }
 
-    func testAutomaticNetworkDefaults() {
-        let policy = TunnelPolicy(trustedNetworkIDs: ["ssid:Office"])
+    func testDefaultsWiFiFullCellularSplit() {
+        let policy = TunnelPolicy()
         XCTAssertEqual(policy.decide(path: .wifi(id: "ssid:Cafe")), .connect(fullTunnel: true))
-        XCTAssertEqual(policy.decide(path: .wifi(id: "ssid:Office")), .connect(fullTunnel: false))
         XCTAssertEqual(policy.decide(path: .cellular), .connect(fullTunnel: false))
         XCTAssertEqual(policy.decide(path: .other), .connect(fullTunnel: true))
     }
 
-    func testUnknownSSIDFailsClosedNeverExit() {
-        let policy = TunnelPolicy(trustedNetworkIDs: ["unidentified", "wifi:en0"])
-        // Even with those IDs in the trusted set, unidentified / interface fingerprints disconnect.
+    func testPermanentRoutingMatrix() {
+        var policy = TunnelPolicy(networkRouting: [
+            "ssid:House": .off,
+            "ssid:Office": .split,
+            "ssid:Cafe": .full
+        ])
+        XCTAssertEqual(policy.decide(path: .wifi(id: "ssid:House")), .disconnect(reason: "Off on this network"))
+        XCTAssertEqual(policy.decide(path: .wifi(id: "ssid:Office")), .connect(fullTunnel: false))
+        XCTAssertEqual(policy.decide(path: .wifi(id: "ssid:Cafe")), .connect(fullTunnel: true))
+        policy.cellularRouting = .off
+        XCTAssertEqual(policy.decide(path: .cellular), .disconnect(reason: "Off on cellular"))
+        policy.cellularRouting = .full
+        XCTAssertEqual(policy.decide(path: .cellular), .connect(fullTunnel: true))
+    }
+
+    func testTemporaryOverride() {
+        let policy = TunnelPolicy(networkRouting: ["ssid:Cafe": .full])
         XCTAssertEqual(
-            policy.decide(path: .wifi(id: "unidentified")),
+            policy.decide(path: .wifi(id: "ssid:Cafe"), override: .off),
+            .disconnect(reason: "Off on this network")
+        )
+        XCTAssertEqual(
+            policy.decide(path: .wifi(id: "ssid:Cafe"), override: .split),
+            .connect(fullTunnel: false)
+        )
+        // Permanent unchanged.
+        XCTAssertEqual(policy.decide(path: .wifi(id: "ssid:Cafe")), .connect(fullTunnel: true))
+    }
+
+    func testUnknownSSIDFailsClosed() {
+        var policy = TunnelPolicy(networkRouting: ["unidentified": .full, "wifi:en0": .full])
+        policy.networkRouting = policy.networkRouting.filter { $0.key.hasPrefix("ssid:") }
+        XCTAssertEqual(
+            TunnelPolicy().decide(path: .wifi(id: "unidentified")),
             .disconnect(reason: "Wi‑Fi name unavailable")
         )
         XCTAssertEqual(
-            policy.decide(path: .wifi(id: "wifi:en0")),
+            TunnelPolicy().decide(path: .wifi(id: "wifi:en0")),
             .disconnect(reason: "Wi‑Fi name unavailable")
         )
-        // Manual exit must not hairpin when SSID is unknown.
-        XCTAssertEqual(
-            TunnelPolicy(mode: .exit).decide(path: .wifi(id: "unidentified")),
-            .disconnect(reason: "Wi‑Fi name unavailable")
-        )
-    }
-
-    func testHomeWiFiAlwaysDisconnectsEvenOverManualExit() {
-        let home: Set<String> = ["ssid:House"]
-        for mode in TunnelPolicy.Mode.allCases {
-            XCTAssertEqual(
-                TunnelPolicy(mode: mode).decide(path: .wifi(id: "ssid:House"), homeSSIDs: home),
-                .disconnect(reason: "Off at home")
-            )
-        }
-        XCTAssertEqual(
-            TunnelPolicy().decide(path: .wifi(id: "ssid:Cafe"), homeSSIDs: home),
-            .connect(fullTunnel: true)
-        )
-    }
-
-    func testHomeIsNotTrusted() {
-        let home: Set<String> = ["ssid:House"]
-        let policy = TunnelPolicy(trustedNetworkIDs: ["ssid:House"])
-        // Home SSIDs win; Trusted membership must not subnet-route on the home LAN.
-        XCTAssertEqual(
-            policy.decide(path: .wifi(id: "ssid:House"), homeSSIDs: home),
-            .disconnect(reason: "Off at home")
-        )
-    }
-
-    func testExplicitRoutingToggleIsHonoredExceptHome() {
-        for path in [TunnelPolicy.PathKind.cellular, .wifi(id: "ssid:Cafe"), .other] {
-            XCTAssertEqual(TunnelPolicy(mode: .split).decide(path: path), .connect(fullTunnel: false))
-            XCTAssertEqual(TunnelPolicy(mode: .exit).decide(path: path), .connect(fullTunnel: true))
-        }
-        XCTAssertEqual(TunnelPolicy(treatCellularAsTrusted: false).decide(path: .cellular), .connect(fullTunnel: true))
     }
 
     func testAllowedIPsUseTunnelNetworkAndHomeNetworks() {
@@ -85,11 +76,24 @@ final class TunnelPolicyTests: XCTestCase {
         let policy = TunnelPolicy()
         XCTAssertEqual(
             policy.allowedIPs(lease: lease, fullTunnel: false),
-            ["10.10.10.0/24", "10.8.0.0/24", "192.168.1.0/24"]
+            ["10.10.10.0/24", "10.8.0.0/24", "192.168.1.0/24", "192.168.1.1/32"]
         )
         XCTAssertEqual(
             Set(policy.allowedIPs(lease: lease, fullTunnel: true)),
-            Set(["10.8.0.0/24", "192.168.1.0/24", "10.10.10.0/24", "0.0.0.0/0", "::/0"])
+            Set(["10.8.0.0/24", "192.168.1.0/24", "10.10.10.0/24", "192.168.1.1/32", "0.0.0.0/0"])
+        )
+        XCTAssertFalse(policy.allowedIPs(lease: lease, fullTunnel: true).contains("::/0"))
+    }
+
+    func testAllowedIPsIncludeDNSHostRoutesOutsideHomeNetworks() {
+        let lease = sampleLease(
+            tunnelNetwork: "10.8.0.0/24",
+            homeNetworks: ["192.168.1.0/24"],
+            dnsServers: ["10.10.10.53", "1.1.1.1"]
+        )
+        XCTAssertEqual(
+            TunnelPolicy().allowedIPs(lease: lease, fullTunnel: false),
+            ["1.1.1.1/32", "10.10.10.53/32", "10.8.0.0/24", "192.168.1.0/24"]
         )
     }
 
@@ -100,11 +104,11 @@ final class TunnelPolicyTests: XCTestCase {
         )
         XCTAssertEqual(
             TunnelPolicy().allowedIPs(lease: lease, fullTunnel: false),
-            ["192.168.1.0/24"]
+            ["192.168.1.0/24", "192.168.1.1/32"]
         )
     }
 
-    func testLegacyTrustDoesNotTrustEveryWiFiInterface() throws {
+    func testLegacyPolicyMigration() throws {
         let name = "moorlan-test-" + UUID().uuidString
         let defaults = UserDefaults(suiteName: name)!
         defer { defaults.removePersistentDomain(forName: name) }
@@ -113,10 +117,30 @@ final class TunnelPolicyTests: XCTestCase {
         """.utf8), forKey: "tunnel-policy")
         let store = ServerStore(defaults: defaults)
         let policy = store.loadPolicy()
-        XCTAssertEqual(policy.mode, .automatic)
-        XCTAssertEqual(policy.trustedNetworkIDs, ["ssid:Office"])
-        try store.savePolicy(TunnelPolicy(mode: .split))
-        XCTAssertEqual(store.loadPolicy().mode, .split)
+        XCTAssertEqual(policy.networkRouting["ssid:Office"], .split)
+        XCTAssertNil(policy.networkRouting["wifi:en0"])
+        XCTAssertEqual(policy.cellularRouting, .split)
+        try store.savePolicy(TunnelPolicy(cellularRouting: .full))
+        XCTAssertEqual(store.loadPolicy().cellularRouting, .full)
+    }
+
+    func testMigrateLegacyHomeSSIDs() throws {
+        let name = "moorlan-test-" + UUID().uuidString
+        let defaults = UserDefaults(suiteName: name)!
+        defer { defaults.removePersistentDomain(forName: name) }
+        let store = ServerStore(defaults: defaults)
+        var policy = TunnelPolicy()
+        var servers = [
+            PairedServer(
+                card: QRCard(pairURL: URL(string: "http://192.168.1.10/v1/pair")!, serverPublicKey: "server"),
+                lease: sampleLease(),
+                homeSSIDs: ["ssid:House"]
+            )
+        ]
+        XCTAssertTrue(try store.migrateLegacyHomeSSIDs(policy: &policy, servers: &servers))
+        XCTAssertEqual(policy.networkRouting["ssid:House"], .off)
+        XCTAssertTrue(servers[0].homeSSIDs.isEmpty)
+        XCTAssertFalse(try store.migrateLegacyHomeSSIDs(policy: &policy, servers: &servers))
     }
 
     func testCorruptServerStoreThrowsInsteadOfEmpty() throws {
@@ -131,12 +155,13 @@ final class TunnelPolicyTests: XCTestCase {
     }
 
     func testExtensionProfileStripsUnpairTokenAndOmitsPrivateKey() throws {
+        var policy = TunnelPolicy()
+        policy.networkRouting["ssid:House"] = .off
         let server = PairedServer(
             card: QRCard(pairURL: URL(string: "http://192.168.1.10/v1/pair")!, serverPublicKey: "server"),
-            lease: sampleLease(unpairToken: "deletion-secret"),
-            homeSSIDs: ["ssid:House"]
+            lease: sampleLease(unpairToken: "deletion-secret")
         )
-        let profile = TunnelProfile(server: server, policy: TunnelPolicy())
+        let profile = TunnelProfile(server: server, policy: policy)
         XCTAssertNil(profile.lease.unpairToken)
         let data = try JSONEncoder().encode(profile)
         let text = String(decoding: data, as: UTF8.self)
@@ -145,10 +170,18 @@ final class TunnelPolicyTests: XCTestCase {
         XCTAssertFalse(text.contains("private"))
         let decoded = try JSONDecoder().decode(TunnelProfile.self, from: data)
         XCTAssertNil(decoded.lease.unpairToken)
-        XCTAssertEqual(decoded.homeSSIDs, ["ssid:House"])
+        XCTAssertEqual(decoded.policy.networkRouting["ssid:House"], .off)
         XCTAssertEqual(decoded.lease.dnsServers, ["192.168.1.1"])
         XCTAssertEqual(decoded.lease.tunnelNetwork, "10.8.0.0/24")
         XCTAssertEqual(decoded.lease.homeNetworks, ["192.168.1.0/24"])
+    }
+
+    func testLegacyHomeSSIDsOnProfileDecode() throws {
+        let json = """
+        {"id":"server","name":"House","lease":{"address":"10.8.0.2/32","tunnel_network":"10.8.0.0/24","home_networks":["192.168.1.0/24"],"public_key":"server","endpoint":"example:51820","dns_servers":["192.168.1.1"]},"policy":{"networkRouting":{},"cellularRouting":"split"},"homeSSIDs":["ssid:House"]}
+        """
+        let decoded = try JSONDecoder().decode(TunnelProfile.self, from: Data(json.utf8))
+        XCTAssertEqual(decoded.policy.networkRouting["ssid:House"], .off)
     }
 
     func testPairedServerDoesNotPersistClientDNSOverrides() throws {
@@ -164,6 +197,11 @@ final class TunnelPolicyTests: XCTestCase {
     }
 
     func testUserFacingErrorsNeverSurfaceRawNEOrURLStrings() {
+        let handshake = UserFacingError.map(MoorlanError.handshakeFailed)
+        XCTAssertEqual(handshake.title, "Home didn’t pick up")
+        XCTAssertEqual(handshake.action, .retry)
+        XCTAssertFalse(handshake.message.lowercased().contains("handshake"))
+
         let stopped = UserFacingError.map(MoorlanError.tunnelStopped)
         XCTAssertEqual(stopped.title, "Tunnel stopped")
         XCTAssertEqual(stopped.action, .retry)

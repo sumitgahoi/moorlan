@@ -1,30 +1,35 @@
-# Moorlan iPhone requirements
+# Moorlan iOS requirements
 
-Authoritative product contract for the iPhone app and Packet Tunnel (`ios/`).
-Normative. Protocol and lease fields MUST match
+Authoritative product contract for the iPhone / iPad app and Packet Tunnel
+(`ios/`). Normative. Protocol and lease fields MUST match
 [server/REQUIREMENTS.md](../server/REQUIREMENTS.md).
 
 ## 1. Product intent
 
-- Pair an iPhone with one or more Moorlan Linux WireGuard sites over **trusted
-  home LAN HTTP**, then roam with a Packet Tunnel and phone-local network policy.
-- v1: enroll / unpair, **multi-tunnel** list, subnet + exit per tunnel, automatic
-  Home / Trusted / Away roles, polished status UI.
+- Pair an iPhone or iPad with one or more Moorlan Linux WireGuard sites over
+  **trusted home LAN HTTP**, then roam with a Packet Tunnel and device-local
+  network policy.
+- v1: enroll / unpair, **multi-tunnel** list, per-network **Off / Split / Full**
+  routing, one **on-demand-active** (default) tunnel.
 - Reuse WireGuardKit, NetworkExtension, AVFoundation, Network, CoreLocation, and
   Keychain. Do **not** reimplement WireGuard crypto, packet forwarding, or a
   wg-quick config parser.
+- **Mac client (planned):** same `moorlan://` QR via in-app camera scan (system
+  Camera → app is iPhone/iPad-primary). Packet Tunnel and Mac UI are not in this
+  tree yet.
 
 ## 2. Trust and permissions
 
 - Control plane trust matches the server: plaintext HTTP on the household LAN
   while pair/unpair runs. No TLS or invite tokens in v1.
-- **Camera** — scan pair/unpair QR; denial keeps scan retryable and offers Open
-  Settings.
+- **Camera** — optional fallback for in-app QR scan; primary path is the system
+  Camera app opening a `moorlan://` invite. Denial keeps in-app scan retryable
+  and offers Open Settings.
 - **Local Network** — required for LAN HTTP to the QR host; probe with a real
   connection to that host:port; surface denial / Settings recovery without
   clearing a pending QR retry.
 - **VPN configuration** — Apple “Add VPN Configurations” MUST be approved;
-  install a distinct profile even when Home policy will keep the tunnel off.
+  install a distinct profile even when Off policy will keep the tunnel down.
 - **Wi‑Fi Information** (+ Precise Location While Using when needed) — SSID only,
   no coordinates. Unavailable SSID → network id `unidentified`. NEVER trust a
   reused interface name (`en0`).
@@ -34,62 +39,67 @@ Normative. Protocol and lease fields MUST match
 
 | Owner | Owns | Does not own |
 | --- | --- | --- |
-| Server lease | `tunnel_network`, `home_networks`, `dns_servers`, `dns_search`, `endpoint`, `address`, server `public_key`, `unpair_token`, lease `mtu` / `persistent_keepalive` | Phone SSIDs, routing mode, which tunnel is selected |
-| Phone | Multi-tunnel list, selected tunnel, Home / Trusted SSIDs, cellular-as-trusted, automatic vs manual exit/split, device label | Lease identity fields; DNS/search policy |
+| Server lease | `tunnel_network`, `home_networks`, `dns_servers`, `dns_search`, `endpoint`, `address`, server `public_key`, `unpair_token`, lease `mtu` / `persistent_keepalive` | Phone SSIDs, routing, which tunnel is on-demand active |
+| Phone | Multi-tunnel list, selected tunnel, on-demand-active tunnel, per-network Off/Split/Full (permanent + temporary), cellular routing, device label | Lease identity fields; DNS/search policy |
 | Linux host | Forwarding / NAT for exit | iOS permissions / on-demand |
 
 Phone MUST NOT override lease DNS/search, invent resolvers (including Cloudflare
 fallback), or override lease tunnel identity fields (endpoint, address, server
 key, mtu, keepalive).
 
-**Naming:** phone “Home” SSIDs ≠ server `home_networks`. Home SSIDs are hairpin
-(tunnel off). `home_networks` are away split-tunnel LAN routes.
+**Naming:** phone **Off** SSIDs ≠ server `home_networks`. Off SSIDs keep the
+tunnel down (hairpin). `home_networks` are away split-tunnel LAN routes.
 
-## 4. Multi-tunnel
+## 4. Multi-tunnel and on-demand default
 
-- Support many paired hosts. Each tunnel supports **subnet** and **exit**.
-- Distinct native `NETunnelProviderManager` per host, keyed by server public key.
-- Home UI: tunnel list / switcher with a clear active card (Tailscale-like host
-  list energy; NordVPN-like status clarity — patterns, not clones).
-- Exactly one **selected** tunnel drives automatic activation; switching MUST be
-  explicit and reversible.
+- Support many paired hosts. Distinct native `NETunnelProviderManager` per host,
+  keyed by server public key.
+- Exactly one tunnel may be **on-demand active** (Default). Activating a tunnel
+  MUST turn on-demand **off** on every other Moorlan profile.
+- Selecting a tunnel in the list for viewing/manual connect MUST NOT steal
+  on-demand unless the user explicitly chooses **Use as default**.
+- After pair:
+  - **First / only** tunnel → auto-activate as on-demand default (no prompt).
+  - If other tunnels already exist → ask **Use as your default?**; Yes activates
+    the new tunnel (others off); No keeps the previous default.
+- Unpair of the active default: if one tunnel remains → auto-activate it; else
+  leave none active until the user picks.
 - Pairing another host MUST NOT delete existing tunnels. Unpair removes **one**
   host only; the shared Keychain client identity is retained for other hosts.
 
-## 5. Routing (per selected tunnel)
+## 5. Routing (Off / Split / Full)
 
-### Network roles (Home ≠ Trusted)
+Each named Wi‑Fi and cellular has a routing policy:
 
-| Role | Meaning | Automatic default |
-| --- | --- | --- |
-| **Home** SSID | Already on that LAN | Tunnel **off** (hairpin). Wins over manual exit. |
-| **Trusted** Wi‑Fi | Known safe network that is not Home | **Subnet** only |
-| **Away** / unidentified Wi‑Fi | Assume hostile | **Exit** |
-| **Cellular** | Trusted by default | **Subnet** (unless user turns off cellular-as-trusted → exit) |
+| Label | Behavior |
+| --- | --- |
+| **Off** | Tunnel stays down |
+| **Split** | Only home routes / DNS through the tunnel |
+| **Full** | All traffic through home (`0.0.0.0/0` only; never `::/0`) |
 
-Trusted does **not** cover Home. Collapsing them would subnet-route on the home
-LAN and hairpin. First-run copy MUST explain the three Wi‑Fi roles in one short
-sentence each (dismissible coach).
-
-When the user joins a **new named** Wi‑Fi, prompt to set Home, Trusted, or leave
-as Away — never assign silently. Marking Home → disconnect-default; marking
-Trusted → subnet-default.
-
-### Modes
-
-- **Automatic** (default), manual **exit**, manual **split**.
-- Manual overrides Automatic except **Home always disconnects**.
+- **Permanent default:** unmarked Wi‑Fi → **Full**; cellular → **Split**.
+- **Home** picker changes are **temporary** (until the path/SSID changes).
+- **Settings** changes are **permanent**.
+- **Pair** on an identifiable Wi‑Fi → that SSID is **permanently Off**.
+- Multiple SSIDs may be permanently Off.
+- No join prompt for new Wi‑Fi. No separate power button or Exit Node toggle —
+  Off / Split / Full is the path control.
+- Unidentified / non-`ssid:` Wi‑Fi → disconnect (fail closed).
 - Policy MUST run in the app **and** the Packet Tunnel extension on path
-  changes.
-- On-demand: when ≥1 Home SSID is known → disconnect on those SSIDs / connect
-  elsewhere; with zero Home SSIDs, disable on-demand (avoid reconnect loops after
-  a self-stop at home).
+  changes. Extension and on-demand use the **permanent** map only.
+- On-demand: when the default tunnel has ≥1 permanent Off SSID → Disconnect on
+  those SSIDs / Connect elsewhere; with zero Off SSIDs, disable on-demand (avoid
+  reconnect loops).
 
 ### AllowedIPs and DNS
 
-- Split: `tunnel_network ∪ home_networks`.
-- Exit: that set plus `0.0.0.0/0` and `::/0`.
+- Split: `tunnel_network ∪ home_networks ∪` each lease `dns_servers` host (`/32`).
+- Full: that set plus `0.0.0.0/0` only (IPv4). Never `::/0`.
 - DNS/search: lease `dns_servers` (required) and optional `dns_search` only.
+  WireGuardKit forces all queries through lease DNS (`matchDomains = [""]`); DNS
+  host routes keep those resolvers reachable in split tunnel. Phone MUST NOT invent
+  Cloudflare (or other) resolvers when the lease has DNS; a TEMP Settings
+  override may exist for debugging only.
 
 ## 6. Pair / unpair
 
@@ -97,20 +107,23 @@ Protocol MUST match [server/REQUIREMENTS.md](../server/REQUIREMENTS.md) §7.
 
 ### Pair
 
-- QR v1: `v`, `pair_url` (`http`, path `/v1/pair` only), `server_public_key`. No
-  invite token.
+- QR v1 is a Camera-openable URL:
+  `moorlan://v1/pair?url=<http control>&spk=<server-wg-public-key>`. No invite
+  token. Legacy JSON QR is not supported.
+- **Primary UX:** system Camera scans the QR → opens Moorlan via the `moorlan`
+  URL scheme → enroll. In-app scanner is a **fallback** only.
 - `POST /v1/pair` with peer `public_key` and editable device **label**.
-- Verify lease `public_key` equals QR `server_public_key`.
-- Persist lease; install VPN profile. On success: cheerful confirmation, then
-  status home showing the new tunnel. Prefer marking current SSID as Home when
-  identifiable; preserve prior Home/Trusted sets on re-pair of the same host.
-- Pair progress: Scan → Reach server → Save VPN profile (cancellable).
+- Verify lease `public_key` equals QR `spk`.
+- Persist lease; install VPN profile. On success: confirmation, then status home
+  with the new tunnel. **MUST** mark current SSID permanently Off when
+  identifiable. Then apply on-demand default rules in §4.
+- Pair progress: Open invite → Reach server → Save VPN profile (cancellable).
 
 ### Unpair
 
-- QR v1: `action: unpair`, `server_public_key`, `unpair_url`. Token NOT in QR.
-- Match saved host by `server_public_key`. Prefer scanned `unpair_url`.
-- If the profile has Home SSIDs, require the phone on one of them.
+- QR v1: `moorlan://v1/unpair?url=…&spk=…`. Token NOT in QR.
+- Match saved host by `spk`. Prefer scanned control `url`.
+- If any permanent Off SSIDs exist, require the phone on one of them.
 - `DELETE` with peer `public_key` + stored `unpair_token`. Success is **HTTP 204
   only**, then remove that host’s VPN profile and local host record.
 - Confirm destructive unpair naming the host. On failure, keep local state for
@@ -120,33 +133,38 @@ Protocol MUST match [server/REQUIREMENTS.md](../server/REQUIREMENTS.md) §7.
 
 | Store | Content |
 | --- | --- |
-| App storage (host records) | Paired hosts: QR card, **full lease including `unpair_token`**, Home/Trusted SSIDs, selection, label, policy knobs |
+| App storage (host records) | Paired hosts: QR card, **full lease including `unpair_token`**, selection, on-demand-active id, label |
+| App storage (policy) | Permanent `networkRouting` + `cellularRouting` |
 | App Group (`group.app.moorlan`) | Non-secret extension `TunnelProfile` per host — **strip `unpair_token`**; **no** private key |
 | Keychain (shared group) | One long-lived client WireGuard private key (`AfterFirstUnlockThisDeviceOnly`); survives unpair of a single host |
 | System | Per-host `NETunnelProviderManager` |
 
 `unpair_token` lives only in the **app host/lease record**. The extension never
-sees it. Keychain is identity only, not the unpair credential.
+sees it. Keychain is identity only, not the unpair credential. Temporary Home
+routing is in-memory only.
 
 ## 8. UX / polish
 
+### Voice
+
+- Plain household English. Prefer Off / Split / Full over jargon where the UI
+  already shows those labels; keep protocol detail behind info sheets.
+- No childish metaphors (raincoat, “Became friends”, path-sleeps). Warm and clear
+  is enough.
+
 ### Visual and HIG
 
-- System SwiftUI: SF Pro, semantic colors, `NavigationStack`, inset grouped
-  `List` / `Form`, SF Symbols, standard toolbars and sheets. No custom brand
-  theme, status orbs, or glass chrome that fights iOS.
-- Cheerful calm: clear success for “Connected”; soft warning for unprotected /
-  hostile-network exit — never alarmist copy for normal states.
-- Status hero in plain English, e.g. “Connected · Home access”, “Connected · Full
-  protection”, “Off at home”, “Paused — another VPN is active”.
-- Empty state: `ContentUnavailableView` + primary “Scan to pair”.
-- Technical details (keys, endpoints) behind disclosure / detail — not on the
-  home hero.
-- Accessibility: Dynamic Type, VoiceOver for status and tunnel switcher, Reduce
-  Motion respected. Haptics only on successful pair/connect when appropriate.
-- Household tone: warm, competent, brief. No dark-pattern urgency. No marketing
-  VPN upsell chrome. Inspire status clarity from Tailscale/NordVPN; do not
-  pixel-clone them.
+- Native SwiftUI: SF Pro via semantic text styles, system/semantic colors,
+  standard margins, native `Toggle` / `Form` / `List` / toolbars /
+  `NavigationStack`, 44pt minimum hit targets. Do not invent a parallel type
+  scale or hard-code a light-only palette that breaks Dark Mode.
+- Home: Off/Split/Full segmented control for the current path; tunnel list with
+  Default badge / Use as default; status text. No power button; no Exit Node toggle.
+- Settings: permanent cellular + Wi‑Fi routing lists.
+- **Connected** means a live WireGuard handshake with the paired peer (UAPI
+  `last_handshake_time_sec` fresh), not merely `NEVPNStatus.connected`.
+- Empty state: invite to pair + primary scan CTA.
+- Accessibility: Dynamic Type, VoiceOver, Reduce Motion respected.
 
 ### Errors
 
@@ -157,18 +175,21 @@ the UI.
 MUST map at least: camera / local-network / VPN permission denied; pair
 unreachable; pair rejected; lease incomplete; VPN configuration failed; **tunnel
 superseded by another VPN** (e.g. Tailscale) with copy that only one VPN can be
-active and Retry when Moorlan can resume; unpair not on Home Wi‑Fi; unpair not
+active and Retry when Moorlan can resume; unpair not on Off Wi‑Fi; unpair not
 acknowledged; Wi‑Fi name unavailable.
 
 ## 9. Non-goals (v1)
 
-- macOS; IPv6 tunnel pool / IPv6 Internet exit; import foreign WireGuard configs
+- IPv6 tunnel pool / IPv6 Internet exit; import foreign WireGuard configs
 - TLS / invites on the control plane; offline unpair queue
-- Always-on VPN with zero Home SSIDs configured
+- Always-on VPN with zero Off SSIDs configured
 - Hairpin via `home_networks` CIDR instead of SSID
-- DNS/search overrides or phone-invented resolver fallbacks
+- DNS/search overrides or phone-invented resolver fallbacks (except TEMP debug)
 - Protocol versions other than v1; proving Internet reachability after pair
 - Configuring the home router / CGNAT
+- Shipping a Mac app in this tree (planned separately)
+- Temporary-vs-save affordance beyond Home=temp / Settings=permanent (no “Save
+  for this network” button required in v1)
 
 ## 10. Failure and recovery
 

@@ -6,25 +6,24 @@ struct RootView: View {
     @EnvironmentObject private var tunnel: TunnelManager
     @Environment(\.scenePhase) private var scenePhase
     @State private var showScanner = false
+    @State private var invitePayload: String?
     @State private var showSettings = false
-    @State private var showRolesCoach = false
 
     var body: some View {
         Group {
             if tunnel.servers.isEmpty {
-                EmptyPairingView(onScan: { showScanner = true })
+                EmptyPairingView(onScan: { openInAppScanner() })
             } else {
                 HomeView(
-                    onScan: { showScanner = true },
+                    onScan: { openInAppScanner() },
                     onSettings: { showSettings = true }
                 )
             }
         }
+        .onOpenURL(perform: handleOpenURL)
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { Task { await tunnel.applyDesiredState() } }
         }
-        .onAppear { presentCoachIfNeeded() }
-        .onChange(of: tunnel.servers.count) { _, _ in presentCoachIfNeeded() }
         .alert(
             tunnel.presentedError?.title ?? "Moorlan",
             isPresented: Binding(
@@ -49,29 +48,28 @@ struct RootView: View {
             Text(error.message)
         }
         .alert(
-            "New Wi‑Fi",
+            MoorlanCopy.useAsDefaultTitle,
             isPresented: Binding(
-                get: { tunnel.pendingNetworkRoleID != nil && !showScanner && !showSettings && !showRolesCoach },
-                set: { if !$0 { tunnel.pendingNetworkRoleID = nil } }
+                get: {
+                    tunnel.pendingDefaultPromptServerID != nil
+                        && !showScanner
+                        && !showSettings
+                        && tunnel.presentedError == nil
+                },
+                set: { if !$0 { tunnel.declinePendingAsDefault() } }
             )
         ) {
-            if let id = tunnel.pendingNetworkRoleID {
-                Button("Home") { tunnel.setNetworkRole(.home, for: id) }
-                Button("Trusted") { tunnel.setNetworkRole(.trusted, for: id) }
-                Button("Leave as Away", role: .cancel) { tunnel.setNetworkRole(.away, for: id) }
+            Button(MoorlanCopy.useAsDefaultYes) {
+                Task { await tunnel.acceptPendingAsDefault() }
+            }
+            Button(MoorlanCopy.useAsDefaultNo, role: .cancel) {
+                tunnel.declinePendingAsDefault()
             }
         } message: {
-            if let id = tunnel.pendingNetworkRoleID {
-                Text("“\(tunnel.displayNetworkName(id))” is new. Home keeps the tunnel off. Trusted uses home access only. Away uses full protection.")
-            }
+            Text(MoorlanCopy.useAsDefaultMessage)
         }
-        .alert("Network roles", isPresented: $showRolesCoach) {
-            Button("Got it") { tunnel.dismissRolesCoach() }
-        } message: {
-            Text("Home is your house Wi‑Fi — tunnel off. Trusted is a safe network that isn’t Home — home access only. Away or unknown Wi‑Fi — full protection.")
-        }
-        .sheet(isPresented: $showScanner) {
-            ScannerSheet()
+        .sheet(isPresented: $showScanner, onDismiss: { invitePayload = nil }) {
+            ScannerSheet(initialPayload: invitePayload)
                 .environmentObject(tunnel)
         }
         .sheet(isPresented: $showSettings) {
@@ -80,10 +78,15 @@ struct RootView: View {
         }
     }
 
-    private func presentCoachIfNeeded() {
-        if tunnel.shouldShowRolesCoach {
-            showRolesCoach = true
-        }
+    private func openInAppScanner() {
+        invitePayload = nil
+        showScanner = true
+    }
+
+    private func handleOpenURL(_ url: URL) {
+        guard url.scheme?.lowercased() == "moorlan" else { return }
+        invitePayload = url.absoluteString
+        showScanner = true
     }
 
     private func openSettings() {

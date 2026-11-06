@@ -4,18 +4,23 @@ import UIKit
 import MoorlanCore
 
 struct ScannerSheet: View {
+    /// When set (Camera → Open / deep link), skip the in-app camera and run pair/unpair.
+    var initialPayload: String? = nil
+
     @EnvironmentObject private var tunnel: TunnelManager
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.moorlanTheme) private var themeForCheer
     @StateObject private var model = ScannerModel()
     @State private var phase: Phase = .camera
     @State private var facingError: UserFacingError?
     @State private var pendingUnpair: UnpairCard?
     @State private var unpairHostName = ""
     @State private var showUnpairConfirmation = false
-    @State private var progressText = "Reaching server…"
-    @State private var completionText = "Paired"
+    @State private var progressText = MoorlanCopy.reachingServer
+    @State private var completionText = MoorlanCopy.paired
     @State private var workTask: Task<Void, Never>?
+    @State private var startedInitial = false
 
     private enum Phase: Equatable {
         case camera
@@ -23,6 +28,8 @@ struct ScannerSheet: View {
         case confirming
         case done
     }
+
+    private var usingInAppCamera: Bool { initialPayload == nil }
 
     var body: some View {
         NavigationStack {
@@ -37,14 +44,20 @@ struct ScannerSheet: View {
                     ProgressView(progressText)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 case .done:
-                    ContentUnavailableView {
-                        Label(completionText, systemImage: "checkmark.circle.fill")
-                    }
+                    PairSuccessView(title: completionText)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color(.systemBackground))
-            .navigationTitle("Scan QR")
+            .background {
+                Group {
+                    if phase == .done {
+                        Color.clear.moorlanCanvas(theme: themeForCheer)
+                    } else {
+                        Color(.systemBackground)
+                    }
+                }
+            }
+            .navigationTitle(MoorlanCopy.scanTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -54,14 +67,16 @@ struct ScannerSheet: View {
                         dismiss()
                     }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        model.toggleTorch()
-                    } label: {
-                        Image(systemName: model.torchOn ? "flashlight.on.fill" : "flashlight.off.fill")
+                if usingInAppCamera {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            model.toggleTorch()
+                        } label: {
+                            Image(systemName: model.torchOn ? "flashlight.on.fill" : "flashlight.off.fill")
+                        }
+                        .disabled(!model.isRunning || phase != .camera)
+                        .accessibilityLabel(model.torchOn ? "Turn flashlight off" : "Turn flashlight on")
                     }
-                    .disabled(!model.isRunning || phase != .camera)
-                    .accessibilityLabel(model.torchOn ? "Turn flashlight off" : "Turn flashlight on")
                 }
             }
             .alert(
@@ -88,44 +103,55 @@ struct ScannerSheet: View {
                 if facingError?.action == .openSettings {
                     Button("Open Settings") { openSettings() }
                 }
-                if facingError?.action == .retry {
+                if facingError?.action == .retry, usingInAppCamera {
                     Button("Retry") {
                         facingError = nil
                         Task { await resumeScanning() }
                     }
                 }
-                Button("OK", role: .cancel) {}
+                Button("OK", role: .cancel) {
+                    facingError = nil
+                    if !usingInAppCamera { dismiss() }
+                }
             } message: {
                 Text(facingError?.message ?? "")
             }
-            .confirmationDialog("Unpair \(unpairHostName)?", isPresented: $showUnpairConfirmation, titleVisibility: .visible) {
-                Button("Unpair", role: .destructive) {
+            .confirmationDialog("\(MoorlanCopy.unpairConfirmTitlePrefix) \(unpairHostName)?", isPresented: $showUnpairConfirmation, titleVisibility: .visible) {
+                Button(MoorlanCopy.unpairConfirmButton, role: .destructive) {
                     Task { await performUnpair() }
                 }
                 Button("Cancel", role: .cancel) {
                     Task { await resumeScanning() }
                 }
             } message: {
-                Text("Remove this device from the server and delete only this host’s local VPN configuration. Other tunnels stay.")
+                Text(MoorlanCopy.unpairConfirmMessage)
             }
             .task {
+                if let initialPayload, !startedInitial {
+                    startedInitial = true
+                    phase = .working
+                    workTask = Task { await handle(initialPayload) }
+                    return
+                }
+                guard usingInAppCamera else { return }
                 await model.start()
             }
             .onChange(of: scenePhase) { _, phase in
+                guard usingInAppCamera else { return }
                 if phase == .active, self.phase == .camera {
                     model.clearCameraError()
                     Task { await model.start() }
                 }
             }
             .onChange(of: model.scannedPayload) { _, payload in
-                guard let payload else { return }
+                guard usingInAppCamera, let payload else { return }
                 workTask?.cancel()
                 workTask = Task { await handle(payload) }
             }
             .onDisappear {
                 workTask?.cancel()
                 workTask = nil
-                model.stop()
+                if usingInAppCamera { model.stop() }
             }
         }
     }
@@ -148,7 +174,7 @@ struct ScannerSheet: View {
             .frame(maxHeight: 420)
             .padding(.horizontal, 20)
 
-            Text("Scan on home Wi‑Fi.")
+            Text(MoorlanCopy.scanBody)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -166,7 +192,7 @@ struct ScannerSheet: View {
 
     private func handle(_ text: String) async {
         phase = .working
-        progressText = "Reading QR…"
+        progressText = MoorlanCopy.pairing
         do {
             try Task.checkCancellation()
             switch try ScannedCode.parse(text) {
@@ -177,10 +203,10 @@ struct ScannerSheet: View {
                 phase = .confirming
                 showUnpairConfirmation = true
             case .pair(let card):
-                progressText = "Reaching server…"
+                progressText = MoorlanCopy.reachingServer
                 try await tunnel.pair(card: card)
                 try Task.checkCancellation()
-                await finish("Paired")
+                await finish(MoorlanCopy.paired)
             }
         } catch is CancellationError {
             await resumeScanning()
@@ -188,7 +214,10 @@ struct ScannerSheet: View {
             await resumeScanning()
         } catch {
             facingError = UserFacingError.map(error)
-            await resumeScanning()
+            if usingInAppCamera {
+                await resumeScanning()
+            }
+            // Deep link: keep sheet up so the error alert can show; OK dismisses.
         }
     }
 
@@ -197,9 +226,9 @@ struct ScannerSheet: View {
         workTask?.cancel()
         workTask = Task {
             phase = .working
-            progressText = "Unpairing…"
+            progressText = MoorlanCopy.unpairing
             if await tunnel.unpair(scanned: card) {
-                await finish("Unpaired")
+                await finish(MoorlanCopy.unpaired)
             } else {
                 facingError = tunnel.presentedError
                     ?? UserFacingError(
@@ -223,6 +252,12 @@ struct ScannerSheet: View {
 
     private func resumeScanning() async {
         pendingUnpair = nil
+        guard usingInAppCamera else {
+            // Deep-link / Camera-open path: leave after an error; user can scan again.
+            phase = .done
+            dismiss()
+            return
+        }
         phase = .camera
         model.resetScan()
         await model.start()

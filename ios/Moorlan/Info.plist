@@ -18,6 +18,17 @@
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
 	<string>1.0</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>app.moorlan.ios</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>moorlan</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>LSRequiresIPhoneOS</key>
@@ -32,7 +43,7 @@
 		<string>_moorlan._tcp</string>
 	</array>
 	<key>NSCameraUsageDescription</key>
-	<string>Moorlan scans the pairing QR shown by the server on your trusted LAN.</string>
+	<string>Optional: scan the pairing QR inside Moorlan if you prefer not to use the system Camera app.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Moorlan pairs with your WireGuard host over the trusted LAN. Allow Local Network so pairing can reach the moorlan server.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
@@ -41,11 +52,16 @@
 	<string>$(AppIdentifierPrefix)app.moorlan.shared</string>
 	<key>UILaunchScreen</key>
 	<dict/>
-	<key>UIRequiresFullScreen</key>
-	<true/>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 </dict>
 </plist>

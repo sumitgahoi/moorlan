@@ -84,10 +84,9 @@ private final class TunnelController {
             if !monitor.snapshot.saturated { break }
             try await Task.sleep(nanoseconds: 50_000_000)
         }
-        let homeSSIDs = Set(profile.homeSSIDs)
-        guard case .connect(let full) = profile.policy.decide(path: monitor.snapshot.kind, homeSSIDs: homeSSIDs) else {
+        guard case .connect(let full) = profile.policy.decide(path: monitor.snapshot.kind) else {
             monitor.stop()
-            throw MoorlanError.tunnelFailed("Tunnel stays off on home Wi‑Fi")
+            throw MoorlanError.tunnelFailed("Tunnel stays off on this network")
         }
         guard !stopping else { throw CancellationError() }
         let config = try configuration(full: full)
@@ -107,18 +106,23 @@ private final class TunnelController {
         guard let profile, let identity = try IdentityStore(accessGroup: AppIdentity.keychainAccessGroup).load() else {
             throw MoorlanError.missingIdentity
         }
-        return try WireGuardProfileBuilder.build(profile, privateKey: identity.privateKey, fullTunnel: full)
+        let config = try WireGuardProfileBuilder.build(profile, privateKey: identity.privateKey, fullTunnel: full)
+        let dns = config.interface.dns.map(\.stringRepresentation).joined(separator: ",")
+        let routes = config.peers.first?.allowedIPs.map(\.stringRepresentation).joined(separator: ",") ?? ""
+        NSLog("[Moorlan] build full=%d dns=[%@] allowedIPs=[%@]", full, dns, routes)
+        return config
     }
     func reload() async throws {
         profile = try readProfile()
-        lastFullTunnel = nil
-        await applyPolicy()
+        // Always re-push settings on app reload (DNS override, etc.) — not only when
+        // split/exit flips. Clearing lastFullTunnel alone races with path updates.
+        await applyPolicy(force: true)
     }
 
     func runtimeConfiguration(_ completionHandler: @escaping (String?) -> Void) {
         adapter.getRuntimeConfiguration(completionHandler: completionHandler)
     }
-    private func applyPolicy() async {
+    private func applyPolicy(force: Bool = false) async {
         guard running, !stopping else { return }
         if updating { pending = true; return }
         updating = true
@@ -126,14 +130,13 @@ private final class TunnelController {
         repeat {
             pending = false
             guard let profile, !monitor.snapshot.saturated else { return }
-            let homeSSIDs = Set(profile.homeSSIDs)
-            switch profile.policy.decide(path: monitor.snapshot.kind, homeSSIDs: homeSSIDs) {
+            switch profile.policy.decide(path: monitor.snapshot.kind) {
             case .disconnect:
                 await stop()
                 provider.cancelTunnelWithError(nil)
                 return
             case .connect(let full):
-                guard full != lastFullTunnel else { continue }
+                guard force || full != lastFullTunnel else { continue }
                 do {
                     let config = try configuration(full: full)
                     try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in

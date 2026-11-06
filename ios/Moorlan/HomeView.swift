@@ -6,63 +6,52 @@ struct HomeView: View {
     var onScan: () -> Void
     var onSettings: () -> Void
 
+    @State private var detailsServer: PairedServer?
+    @State private var showRoutingTip = false
+
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                Spacer(minLength: 12)
+            List {
+                Section {
+                    routingPicker
+                } header: {
+                    HStack(spacing: 6) {
+                        Text("This network")
+                        Button {
+                            showRoutingTip = true
+                        } label: {
+                            Image(systemName: "info.circle")
+                                .font(.footnote)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("About Off, Split, and Full")
+                    }
+                } footer: {
+                    Text(MoorlanCopy.homeRoutingFooter)
+                }
 
-                ConnectionDiagramView(state: diagramState)
-                    .padding(.bottom, 28)
-
-                VStack(spacing: 6) {
+                Section {
                     Text(tunnel.statusHeadline)
-                        .font(.largeTitle.weight(.bold))
-                        .multilineTextAlignment(.center)
-                        .accessibilityAddTraits(.isHeader)
-
-                    profileLabel
-
+                        .font(.headline)
                     Text(tunnel.statusDetail)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    if tunnel.status == .connected, let rates = tunnel.transferRates {
+                    if let rates = tunnel.transferRates, tunnel.status == .connected {
                         Text(rates)
-                            .font(.subheadline.monospacedDigit().weight(.medium))
+                            .font(.footnote.monospaced())
                             .foregroundStyle(.secondary)
-                            .padding(.top, 4)
                             .accessibilityLabel(tunnel.transferRatesAccessibility)
                     }
+                } header: {
+                    Text("Status")
                 }
-                .padding(.horizontal, 28)
 
-                Spacer(minLength: 24)
-
-                Button {
-                    Task { await tunnel.toggleDesiredConnection() }
-                } label: {
-                    Text(buttonTitle)
-                        .font(.body.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 4)
+                Section("Tunnels") {
+                    ForEach(tunnel.servers) { server in
+                        tunnelRow(server)
+                    }
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .tint(buttonIsDisconnect ? Color.red.opacity(0.85) : nil)
-                .disabled(
-                    tunnel.status == .connecting
-                        || tunnel.status == .disconnecting
-                        || tunnel.onHomeWiFi
-                        || tunnel.wifiIdentityMissing
-                        || tunnel.isUnpairing
-                )
-                .padding(.horizontal, 28)
-                .padding(.bottom, 28)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color(.systemGroupedBackground))
             .navigationTitle("Moorlan")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -70,78 +59,103 @@ struct HomeView: View {
                     Button(action: onSettings) {
                         Image(systemName: "gearshape")
                     }
-                    .accessibilityLabel("Settings")
+                    .accessibilityLabel(MoorlanCopy.settingsTitle)
                     .disabled(tunnel.isUnpairing)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(action: onScan) {
-                        Image(systemName: "qrcode.viewfinder")
+                        Image(systemName: "plus")
                     }
-                    .accessibilityLabel("Scan to pair")
+                    .accessibilityLabel(MoorlanCopy.scanNavA11y)
                     .disabled(tunnel.isUnpairing)
                 }
             }
+            .sheet(item: $detailsServer) { server in
+                TunnelDetailsSheet(server: server)
+            }
+            .alert("Off, Split, Full", isPresented: $showRoutingTip) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(MoorlanCopy.routingTip)
+            }
         }
     }
 
-    @ViewBuilder
-    private var profileLabel: some View {
-        if tunnel.servers.count > 1 {
+    private var routingPicker: some View {
+        let disabled = tunnel.currentPathID == nil || tunnel.wifiIdentityMissing || tunnel.isUnpairing
+        return Picker("Routing", selection: routingBinding) {
+            Text(MoorlanCopy.routingOff).tag(NetworkRouting.off)
+            Text(MoorlanCopy.routingSplit).tag(NetworkRouting.split)
+            Text(MoorlanCopy.routingFull).tag(NetworkRouting.full)
+        }
+        .pickerStyle(.segmented)
+        .disabled(disabled)
+        .opacity(disabled ? 0.45 : 1)
+        .accessibilityLabel("Network routing")
+        .accessibilityHint(MoorlanCopy.homeRoutingFooter)
+    }
+
+    private var routingBinding: Binding<NetworkRouting> {
+        Binding(
+            get: { tunnel.effectiveRouting ?? .full },
+            set: { tunnel.setTemporaryRouting($0) }
+        )
+    }
+
+    private func tunnelRow(_ server: PairedServer) -> some View {
+        let selected = server.id == tunnel.selectedServer?.id
+        let isDefault = server.id == tunnel.onDemandActiveID
+        return HStack(spacing: 10) {
+            Button {
+                Task {
+                    await tunnel.selectProfile(server.id)
+                    await tunnel.applyDesiredState()
+                }
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(selected ? Color.accentColor : Color.secondary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(server.displayName)
+                            .font(.body.weight(selected ? .semibold : .regular))
+                            .foregroundStyle(.primary)
+                        if isDefault {
+                            Text(MoorlanCopy.defaultBadge)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(tunnel.isUnpairing)
+            .accessibilityLabel(server.displayName)
+            .accessibilityAddTraits(selected ? [.isSelected] : [])
+            .accessibilityHint(MoorlanCopy.pickTunnelA11y)
+
             Menu {
-                ForEach(tunnel.servers) { server in
-                    Button {
-                        Task {
-                            await tunnel.selectProfile(server.id)
-                            await tunnel.applyDesiredState()
-                        }
-                    } label: {
-                        if server.id == tunnel.selectedServer?.id {
-                            Label(server.displayName, systemImage: "checkmark")
-                        } else {
-                            Text(server.displayName)
-                        }
+                if !isDefault {
+                    Button(MoorlanCopy.useAsDefault) {
+                        Task { await tunnel.setOnDemandActive(server.id) }
+                    }
+                }
+                Button("Details") {
+                    detailsServer = server
+                }
+                Button(MoorlanCopy.removeTunnelA11y, role: .destructive) {
+                    Task {
+                        await tunnel.selectProfile(server.id)
+                        onScan()
                     }
                 }
             } label: {
-                HStack(spacing: 4) {
-                    Text(tunnel.selectedServer?.displayName ?? "Choose tunnel")
-                        .font(.body.weight(.medium))
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.tertiary)
-                }
+                Image(systemName: "ellipsis.circle")
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
             .disabled(tunnel.isUnpairing)
-            .accessibilityLabel("Tunnel")
-            .accessibilityValue(tunnel.selectedServer?.displayName ?? "None")
-        } else if let name = tunnel.selectedServer?.displayName {
-            Text(name)
-                .font(.body.weight(.medium))
-                .foregroundStyle(.secondary)
         }
-    }
-
-    private var diagramState: ConnectionDiagramView.LinkState {
-        if tunnel.wifiIdentityMissing { return .unreachable }
-        if tunnel.onHomeWiFi { return .atHome }
-        switch tunnel.status {
-        case .invalid: return .unreachable
-        case .connecting, .disconnecting: return .connecting
-        case .connected:
-            return tunnel.effectiveExit ? .connectedExit : .connectedSplit
-        case .disconnected:
-            return .idle
-        }
-    }
-
-    private var buttonTitle: String {
-        switch tunnel.status {
-        case .connected, .connecting: return "Disconnect"
-        default: return "Connect"
-        }
-    }
-
-    private var buttonIsDisconnect: Bool {
-        tunnel.status == .connected || tunnel.status == .connecting
     }
 }

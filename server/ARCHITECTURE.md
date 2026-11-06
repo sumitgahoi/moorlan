@@ -88,7 +88,8 @@ sequenceDiagram
 
 1. Resolve interface (sole YAML iface, or required `--interface`); refuse if not in YAML.
 2. Lock interface; discover host; reconcile.
-3. Print pair QR (`pair_url`, `server_public_key`); bind sticky root `private-endpoint`.
+3. Print pair QR (`moorlan://v1/pair?url=…&spk=…`); bind sticky root
+   `private-endpoint`.
 4. On `POST /v1/pair`: validate label/key → allocate or reuse `/32` → commit peer
    row → reconcile → return lease.
 5. Lease includes `tunnel_network` (pool from live device), `home_networks`,

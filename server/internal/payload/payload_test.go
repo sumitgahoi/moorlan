@@ -1,6 +1,7 @@
 package payload
 
 import (
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -11,9 +12,19 @@ func TestCardRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if !strings.HasPrefix(text, "moorlan://v1/pair?") {
+		t.Fatalf("not a moorlan pair invite: %s", text)
+	}
 	got, err := Parse(text)
 	if err != nil || got != card {
 		t.Fatalf("%+v %v", got, err)
+	}
+	u, err := url.Parse(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.Query().Get("url") != card.PairURL || u.Query().Get("spk") != card.ServerPublicKey {
+		t.Fatalf("query: %v", u.Query())
 	}
 }
 
@@ -22,6 +33,12 @@ func TestCardRejectsBadVersionsAndURLs(t *testing.T) {
 		if _, err := Marshal(card); err == nil {
 			t.Fatalf("accepted %+v", card)
 		}
+	}
+}
+
+func TestCardRejectsJSONPayload(t *testing.T) {
+	if _, err := Parse(`{"v":1,"pair_url":"http://192.168.1.10:8756/v1/pair","server_public_key":"AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE="}`); err == nil {
+		t.Fatal("accepted legacy JSON QR")
 	}
 }
 
@@ -42,11 +59,14 @@ func TestUnpairCardContainsOnlyPublicDiscoveryData(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if !strings.HasPrefix(text, "moorlan://v1/unpair?") {
+		t.Fatalf("not a moorlan unpair invite: %s", text)
+	}
 	got, err := ParseUnpair(text)
 	if err != nil || got != card {
 		t.Fatalf("%+v %v", got, err)
 	}
-	if strings.Contains(text, "token") {
+	if strings.Contains(strings.ToLower(text), "token") {
 		t.Fatal("unpair QR leaked a credential field")
 	}
 	if _, err := Parse(text); err == nil {
