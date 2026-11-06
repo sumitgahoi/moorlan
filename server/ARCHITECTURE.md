@@ -75,11 +75,9 @@ sequenceDiagram
   participant Sys as systemd
   participant CLI as moorlan
 
-  Op->>Conf: copy example and edit
-  Op->>Sys: enable moorlan-reconcile.service
-  Op->>CLI: --pair
-  CLI->>Conf: load and validate
-  CLI->>CLI: reconcile iface, print QR, serve private-endpoint
+  Op->>Sys: install.sh (binary, example YAML, reconcile unit)
+  Op->>Conf: edit moorlan.yaml (one time)
+  Note over Op,CLI: Day to day: moorlan --pair
 ```
 
 - YAML at `/etc/moorlan/moorlan.yaml` MUST already exist (hint example path if missing).

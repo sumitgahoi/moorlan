@@ -91,14 +91,8 @@ Invariants:
 - List-valued keys preserve order as preference order. Unknown keys MUST fail
   load.
 - Site settings come from the YAML file only. No CLI overrides of site keys in v1.
-- Setup:
-
-```bash
-sudo cp /usr/share/moorlan/moorlan.yaml.example /etc/moorlan/moorlan.yaml
-# edit …
-sudo systemctl enable --now moorlan-reconcile.service
-sudo moorlan --pair
-```
+- Setup (operator-facing; see [README.md](README.md)): run `install.sh`, edit
+  `/etc/moorlan/moorlan.yaml` once, then use `--pair` day to day.
 
 ### Naming
 

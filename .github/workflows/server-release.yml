@@ -54,30 +54,31 @@ jobs:
         run: |
           out="moorlan-${GOOS}-${GOARCH}"
           go build -trimpath -ldflags="-s -w" -o "${out}" ./cmd/moorlan
-          sha256sum "${out}" > "${out}.sha256"
       - uses: actions/upload-artifact@v4
         with:
           name: moorlan-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: |
-            server/moorlan-${{ matrix.goos }}-${{ matrix.goarch }}
-            server/moorlan-${{ matrix.goos }}-${{ matrix.goarch }}.sha256
+          path: server/moorlan-${{ matrix.goos }}-${{ matrix.goarch }}
           if-no-files-found: error
 
-  example-conf:
-    name: Example YAML
+  packaged-files:
+    name: Example YAML and unit
     needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/upload-artifact@v4
         with:
-          name: moorlan-yaml-example
-          path: server/moorlan.yaml.example
+          name: moorlan-packaged-files
+          path: |
+            server/moorlan.yaml.example
+            server/systemd/moorlan-reconcile.service
+            server/install.sh
+            server/uninstall.sh
           if-no-files-found: error
 
   release:
     name: GitHub Release
-    needs: [build, example-conf]
+    needs: [build, packaged-files]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
@@ -95,8 +96,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           shopt -s nullglob
-          assets=(dist/moorlan-linux-* dist/moorlan.yaml.example)
-          if [ ${#assets[@]} -lt 2 ]; then
+          chmod +x dist/install.sh dist/uninstall.sh
+          assets=(
+            dist/moorlan-linux-*
+            dist/moorlan.yaml.example
+            dist/moorlan-reconcile.service
+            dist/install.sh
+            dist/uninstall.sh
+          )
+          if [ ${#assets[@]} -lt 5 ]; then
             echo "missing release assets" >&2
             ls -la dist >&2 || true
             exit 1
