@@ -107,9 +107,10 @@ sequenceDiagram
 1. Target set: explicit `--interface`, or every iface in YAML **or** still present in DB.
 2. Per iface (stable lock order): ensure each DB peer is on the live device with
    correct AllowedIPs; remove every live peer absent from the DB for that iface.
-3. Soft-fail per iface. No `pending_removals` journal. Boot unit runs
-   `moorlan --reconcile` with a bounded restart window (~5 minutes) while devices
-   are not yet usable.
+3. Soft-fail per iface inside the run (continue to the next). Exit non-zero if
+   any iface failed so the boot unit retries. No `pending_removals` journal.
+   Boot unit runs `moorlan --reconcile` with a bounded restart window
+   (~5 minutes) while devices are not yet usable.
 
 ## 5. Persistence
 

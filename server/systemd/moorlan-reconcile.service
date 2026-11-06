@@ -1,8 +1,8 @@
 [Unit]
 Description=Reconcile Moorlan WireGuard peers
 Documentation=https://github.com/sumitgahoi/moorlan/blob/main/server/README.md
-# moorlan --reconcile soft-fails per interface until each WireGuard device is usable;
-# systemd retries within the start-limit window.
+# moorlan --reconcile continues across interfaces, but exits non-zero if any fail
+# so systemd retries within the start-limit window while devices become usable.
 After=network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=300

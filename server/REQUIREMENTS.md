@@ -119,7 +119,7 @@ name order.
 | `--unpair [--interface <iface>]` | Same interface selection rules when the iface is in YAML; when the iface is absent from YAML but still has DB state, `--interface` is required. Reconcile, print unpair QR, DELETE-only HTTP server | Peer removed from DB → HTTP success; live MAY lag until next reconcile |
 | `--remove --interface <iface> --peer-public-key <key>` | Admin revoke by peer WireGuard public key (no QR). Works with DB state even if iface is absent from YAML | Same DB-first success as unpair |
 | `--list-peers [--interface <iface>]` | Print label, public key, address from SQLite. Optional `--interface` filters; omit to list all | Read-only |
-| `--reconcile [--interface <iface>]` | With `--interface`: apply SQLite → live for that iface. Without: every iface that appears in YAML **or** still has rows in `interfaces` / `peers`. Soft-fail per iface (one down device MUST NOT block others) | Each successful iface: live matches DB; overall process fails only if every target fails, or fails loudly per operator-facing summary (retryable) |
+| `--reconcile [--interface <iface>]` | With `--interface`: apply SQLite → live for that iface. Without: every iface that appears in YAML **or** still has rows in `interfaces` / `peers`. Soft-fail per iface inside the run (one down device MUST NOT block others); process exits non-zero if any target failed so boot retries can continue | Each successful iface: live matches DB; overall process fails (retryable) if any target failed |
 
 `--rehydrate` is not a product name; boot and operators use `--reconcile`.
 
@@ -192,7 +192,8 @@ There is no `--add-interface` or `--remove-interface`.
 - `--pair` / `--unpair` / `--remove` reconcile around mutation. Boot runs
   `moorlan --reconcile` via a single systemd oneshot with a bounded restart
   window (~5 minutes) while WireGuard devices are not yet usable. Soft-fail per
-  interface.
+  interface inside the run; any failed iface makes the process exit non-zero so
+  systemd retries.
 
 ## 9. Non-goals (v1)
 

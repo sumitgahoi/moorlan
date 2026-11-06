@@ -250,21 +250,19 @@ func runReconcile(ctx context.Context, site settings.Site, storePath, ifaceFlag 
 		fmt.Printf("nothing to reconcile (no interfaces in %s or %s)\n", settings.Path, storePath)
 		return nil
 	}
-	var okCount, failed int
+	var failed int
 	for _, name := range targets {
 		if err := reconcileOne(ctx, storePath, name); err != nil {
 			failed++
 			fmt.Fprintf(os.Stderr, "moorlan: reconcile %s: %v\n", name, err)
 			continue
 		}
-		okCount++
 		fmt.Printf("reconciled %s from %s\n", name, storePath)
 	}
-	if failed == len(targets) {
-		return fmt.Errorf("reconcile failed for every interface (%d)", failed)
-	}
+	// Soft-fail per iface inside the run (keep going), but any failure must
+	// exit non-zero so systemd Restart=on-failure retries the boot window.
 	if failed > 0 {
-		fmt.Fprintf(os.Stderr, "moorlan: reconciled %d/%d\n", okCount, len(targets))
+		return fmt.Errorf("reconcile failed for %d/%d interfaces", failed, len(targets))
 	}
 	return nil
 }
