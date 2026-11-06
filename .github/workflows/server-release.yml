@@ -64,16 +64,24 @@ jobs:
     name: Example YAML and unit
     needs: test
     runs-on: ubuntu-latest
+    # Override job-wide working-directory so paths stay workspace-relative.
+    defaults:
+      run:
+        working-directory: .
     steps:
       - uses: actions/checkout@v4
+      - name: Flatten packaged files
+        run: |
+          mkdir -p packaged
+          cp server/moorlan.yaml.example \
+             server/install.sh \
+             server/uninstall.sh \
+             server/systemd/moorlan-reconcile.service \
+             packaged/
       - uses: actions/upload-artifact@v4
         with:
           name: moorlan-packaged-files
-          path: |
-            server/moorlan.yaml.example
-            server/systemd/moorlan-reconcile.service
-            server/install.sh
-            server/uninstall.sh
+          path: packaged/*
           if-no-files-found: error
 
   release:
