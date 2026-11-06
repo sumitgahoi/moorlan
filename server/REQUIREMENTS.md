@@ -80,9 +80,11 @@ Invariants:
 
 - Canonical path only: `/etc/moorlan/moorlan.yaml`.
 - Shipped example: `/usr/share/moorlan/moorlan.yaml.example` — a minimal
-  template. Comments appear only where a key is ambiguous; full key docs live
-  here and in [README.md](README.md).
-- Root keys: `private-endpoint`. Peer DB path is fixed at
+  template with an illustrative `private-endpoint` and `interfaces: {}` so first
+  install manages nothing. Comments appear only where a key is ambiguous; full
+  key docs live here and in [README.md](README.md).
+- Root `private-endpoint` is always required. Empty `interfaces` is valid;
+  `--reconcile` is a successful no-op. Peer DB path is fixed at
   `/var/lib/moorlan/moorlan.db` (not a YAML key).
 - Under `interfaces.<name>`: `public-endpoint`, `home-networks`, `dns-servers`
   (required), `dns-search` (optional). Map key `<name>` is the WireGuard

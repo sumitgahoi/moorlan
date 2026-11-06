@@ -22,14 +22,14 @@ curl -fsSL https://github.com/sumitgahoi/moorlan/releases/latest/download/instal
 sudoedit /etc/moorlan/moorlan.yaml
 ```
 
-The example is commented out so installation cannot claim an existing interface.
-Uncomment the settings and replace the interface name, `private-endpoint`,
-`public-endpoint`, `home-networks`, and DNS to match your LAN (see Site conf /
-Notes). Reconciliation will fail safely until the YAML is configured. On a
-configured interface, it removes live peers absent from Moorlan's database.
-Then pair phones under Day to day.
+Install ships a dummy `private-endpoint` and `interfaces: {}` so nothing is
+claimed yet and reconcile succeeds as a no-op. When ready, set `private-endpoint`
+to a LAN address on this host, add an interface stanza, and fill
+`public-endpoint`, `home-networks`, and DNS for your site (see Site conf /
+Notes). On a configured interface, reconciliation removes live peers absent from
+Moorlan's database. Then pair phones under Day to day.
 
-If `moorlan-reconcile.service` failed before WireGuard or YAML were ready:
+If `moorlan-reconcile.service` failed because WireGuard was not up yet:
 
 ```bash
 sudo systemctl reset-failed moorlan-reconcile.service && sudo systemctl start moorlan-reconcile.service

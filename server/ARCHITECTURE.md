@@ -118,7 +118,7 @@ sequenceDiagram
 | Path | Content |
 | --- | --- |
 | `/etc/moorlan/moorlan.yaml` | `private-endpoint`; per-iface `public-endpoint`, `home-networks`, `dns-servers`, optional `dns-search` |
-| `/usr/share/moorlan/moorlan.yaml.example` | Minimal site template (comments only where ambiguous) |
+| `/usr/share/moorlan/moorlan.yaml.example` | Minimal site template (`interfaces: {}` until configured) |
 | `/var/lib/moorlan/moorlan.db` | Interfaces + peers SoT |
 | `/etc/systemd/system/moorlan-reconcile.service` | Boot reconcile oneshot |
 | `/run/moorlan-<iface>.lock` | flock |

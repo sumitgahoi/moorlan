@@ -96,13 +96,24 @@ interfaces:
 	}
 }
 
-func TestLoadRejectsLegacyAndMissingRequired(t *testing.T) {
+func TestLoadEmptyInterfacesIsValid(t *testing.T) {
 	writeSite(t, `
 private-endpoint: 10.10.10.1:8756
 interfaces: {}
 `)
-	if _, err := Load(); err != nil {
+	got, err := Load()
+	if err != nil {
 		t.Fatal(err)
+	}
+	if got.PrivateEndpoint != "10.10.10.1:8756" || len(got.Interfaces) != 0 {
+		t.Fatalf("empty interfaces: %+v", got)
+	}
+}
+
+func TestLoadRejectsLegacyAndMissingRequired(t *testing.T) {
+	writeSite(t, `interfaces: {}`)
+	if _, err := Load(); err == nil {
+		t.Fatal("missing private-endpoint accepted")
 	}
 	writeSite(t, `
 interfaces:

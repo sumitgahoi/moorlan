@@ -29,18 +29,16 @@ mkdir -p /usr/share/moorlan /etc/moorlan /var/lib/moorlan
 install -m 644 "$tmp/moorlan.yaml.example" /usr/share/moorlan/moorlan.yaml.example
 if [[ ! -e /etc/moorlan/moorlan.yaml ]]; then
   cp /usr/share/moorlan/moorlan.yaml.example /etc/moorlan/moorlan.yaml
-  echo "wrote /etc/moorlan/moorlan.yaml — uncomment settings and replace values before use"
+  echo "wrote /etc/moorlan/moorlan.yaml (example values; edit before pairing)"
 else
   echo "kept existing /etc/moorlan/moorlan.yaml"
 fi
 install -m 644 "$tmp/moorlan-reconcile.service" /etc/systemd/system/moorlan-reconcile.service
 systemctl daemon-reload
-if ! systemctl enable --now moorlan-reconcile.service; then
-  echo "Reconciliation could not start; the commented example must be configured first."
-fi
+systemctl enable --now moorlan-reconcile.service
 
 echo
-echo "Next: bring your WireGuard interface up, uncomment and edit /etc/moorlan/moorlan.yaml (one time),"
-echo "then: sudo moorlan --pair"
-echo "If moorlan-reconcile.service failed before WG/YAML were ready:"
+echo "Next: bring WireGuard up, edit /etc/moorlan/moorlan.yaml (private-endpoint + interface),"
+echo "then: sudo systemctl start moorlan-reconcile.service && sudo moorlan --pair"
+echo "If reconcile failed because WireGuard was not ready yet:"
 echo "  sudo systemctl reset-failed moorlan-reconcile.service && sudo systemctl start moorlan-reconcile.service"
