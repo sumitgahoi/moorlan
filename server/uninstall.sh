@@ -17,5 +17,6 @@ rm -f /usr/local/bin/moorlan \
   /var/lib/moorlan/moorlan.db
 rmdir /usr/share/moorlan /etc/moorlan /var/lib/moorlan 2>/dev/null || true
 
-echo "Moorlan removed. WireGuard device unchanged."
+echo "Moorlan removed (binary, unit, site YAML, and peer DB)."
+echo "WireGuard device unchanged."
 echo "If phones are still paired, remove the VPN profile on each device."

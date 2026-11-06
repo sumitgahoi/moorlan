@@ -8,7 +8,7 @@ Design: [ARCHITECTURE.md](ARCHITECTURE.md).
 ## Setup
 
 You need an up WireGuard interface (e.g. `wg0`) with exactly one private IPv4
-(`/16`–`/30`) and no peers yet.
+(`/16`–`/30`). Starting with zero peers is the usual path for a new device.
 
 ### Download
 
@@ -25,6 +25,12 @@ sudoedit /etc/moorlan/moorlan.yaml
 Edit `private-endpoint`, `public-endpoint`, `home-networks`, and DNS to match
 your LAN (see Site conf / Notes). Then pair phones under Day to day.
 
+If `moorlan-reconcile.service` failed before WireGuard or YAML were ready:
+
+```bash
+sudo systemctl reset-failed moorlan-reconcile.service && sudo systemctl start moorlan-reconcile.service
+```
+
 **Upgrade:** re-run the download step (keeps your YAML and DB).
 
 **Remove:** unpair in the app if you want phones cleared, then:
@@ -33,7 +39,8 @@ your LAN (see Site conf / Notes). Then pair phones under Day to day.
 curl -fsSL https://github.com/sumitgahoi/moorlan/releases/latest/download/uninstall.sh | sudo bash
 ```
 
-Leaves the WireGuard device alone.
+Removes the binary, unit, site YAML, and peer DB. Leaves the WireGuard device
+alone.
 
 ## Trusted home LAN only
 
@@ -45,12 +52,16 @@ the pairing port or run pair/unpair on guest Wi‑Fi. Those modes idle-stop afte
 ## Day to day
 
 ```bash
-sudo moorlan --pair                          # sole iface in YAML; else add --interface
+sudo moorlan --pair                            # sole iface in YAML; else add --interface
+sudo moorlan --unpair                          # same --interface rules
 sudo moorlan --list-peers
-sudo moorlan --unpair --interface wg0
 sudo moorlan --remove --interface wg0 --peer-public-key '<device-public-key>'
 sudo moorlan --reconcile
 ```
+
+`--pair` / `--unpair` print only a QR on stdout and stay up for more devices
+until idle or Ctrl-C. Successful enroll/unpair lines appear on stderr. Confirm
+peers with `--list-peers`.
 
 | Command | Role |
 | --- | --- |

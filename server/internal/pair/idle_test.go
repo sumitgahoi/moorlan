@@ -42,7 +42,11 @@ func TestIdleTouchExtendsDeadline(t *testing.T) {
 func TestSuccessTouchesIdleFailuresDoNot(t *testing.T) {
 	var touches atomic.Int32
 	assign := &fakeAssigner{}
-	handler := New(assign, func() { touches.Add(1) })
+	touch := Notify{
+		Paired:   func(string, string) { touches.Add(1) },
+		Unpaired: func(string) { touches.Add(1) },
+	}
+	handler := New(assign, touch)
 
 	if got := post(handler, `{`); got != 400 || touches.Load() != 0 {
 		t.Fatalf("bad request: status=%d touches=%d", got, touches.Load())
@@ -59,7 +63,7 @@ func TestSuccessTouchesIdleFailuresDoNot(t *testing.T) {
 		t.Fatalf("unpair: status=%d touches=%d", got, touches.Load())
 	}
 
-	unpairOnly := NewUnpairOnly(assign, func() { touches.Add(1) })
+	unpairOnly := NewUnpairOnly(assign, touch)
 	if got := post(unpairOnly, body(testKey(2))); got != 405 || touches.Load() != 2 {
 		t.Fatalf("unpair-only POST: status=%d touches=%d", got, touches.Load())
 	}

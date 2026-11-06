@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
-	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -39,9 +40,25 @@ type request struct {
 	Label     string `json:"label"`
 }
 
-// New serves enrollment and unpair. onSuccess runs after HTTP 2xx mutations only
-// (nil is fine). Bodies are plaintext JSON on the trusted LAN (see REQUIREMENTS).
-func New(assign Assigner, onSuccess func()) http.Handler {
+// Notify is optional operator feedback during a pair/unpair HTTP session.
+// Nil funcs are skipped (Error falls back to stderr with a moorlan: prefix).
+type Notify struct {
+	Paired   func(label, peerPublicKey string)
+	Unpaired func(peerPublicKey string)
+	Error    func(format string, args ...any)
+}
+
+func (n Notify) errorf(format string, args ...any) {
+	if n.Error != nil {
+		n.Error(format, args...)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "moorlan: "+format+"\n", args...)
+}
+
+// New serves enrollment and unpair. Bodies are plaintext JSON on the trusted LAN
+// (see REQUIREMENTS).
+func New(assign Assigner, notify Notify) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/pair", func(w http.ResponseWriter, r *http.Request) {
 		var body request
@@ -64,11 +81,12 @@ func New(assign Assigner, onSuccess func()) http.Handler {
 			writeError(w, 400, err.Error())
 			return
 		}
+		label := payload.NormalizeLabel(body.Label)
 		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 		defer cancel()
-		lease, err := assign.Assign(ctx, key, payload.NormalizeLabel(body.Label))
+		lease, err := assign.Assign(ctx, key, label)
 		if err != nil {
-			log.Printf("pairing assignment failed: %v", err)
+			notify.errorf("pairing assignment failed: %v", err)
 			writeError(w, 500, "could not register peer; check server logs and retry")
 			return
 		}
@@ -76,22 +94,22 @@ func New(assign Assigner, onSuccess func()) http.Handler {
 		if err := json.NewEncoder(w).Encode(lease); err != nil {
 			return
 		}
-		if onSuccess != nil {
-			onSuccess()
+		if notify.Paired != nil {
+			notify.Paired(lease.Label, key)
 		}
 	})
-	mux.HandleFunc("DELETE /v1/pair", unpairHandler(assign.Remove, onSuccess))
+	mux.HandleFunc("DELETE /v1/pair", unpairHandler(assign.Remove, notify))
 	return mux
 }
 
 // NewUnpairOnly never registers the enrollment route, even with a valid token.
-func NewUnpairOnly(assign Assigner, onSuccess func()) http.Handler {
+func NewUnpairOnly(assign Assigner, notify Notify) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("DELETE /v1/pair", unpairHandler(assign.Remove, onSuccess))
+	mux.HandleFunc("DELETE /v1/pair", unpairHandler(assign.Remove, notify))
 	return mux
 }
 
-func unpairHandler(remove func(context.Context, string, string) error, onSuccess func()) http.HandlerFunc {
+func unpairHandler(remove func(context.Context, string, string) error, notify Notify) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			PublicKey   string `json:"public_key"`
@@ -119,13 +137,13 @@ func unpairHandler(remove func(context.Context, string, string) error, onSuccess
 				writeError(w, 403, "unpair credential does not match")
 				return
 			}
-			log.Printf("peer removal failed: %v", err)
+			notify.errorf("peer removal failed: %v", err)
 			writeError(w, 500, "could not remove peer; check server logs")
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
-		if onSuccess != nil {
-			onSuccess()
+		if notify.Unpaired != nil {
+			notify.Unpaired(key)
 		}
 	}
 }

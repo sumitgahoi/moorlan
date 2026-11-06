@@ -31,23 +31,19 @@ func main() {
 func run() error {
 	fs := flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	pairMode := fs.Bool("pair", false, "show pairing QR and accept enrollments")
-	unpair := fs.Bool("unpair", false, "show unpair QR and accept deletions")
+	pairMode := fs.Bool("pair", false, "print pair QR; enroll devices until idle (2 minutes) or Ctrl-C")
+	unpair := fs.Bool("unpair", false, "print unpair QR; accept deletions until idle (2 minutes) or Ctrl-C")
 	remove := fs.Bool("remove", false, "remove a managed peer by WireGuard public key and exit")
 	peerPublicKey := fs.String("peer-public-key", "", "peer WireGuard public key (with --remove)")
 	listPeers := fs.Bool("list-peers", false, "print enrolled peers (label, public key, address) and exit")
 	reconcile := fs.Bool("reconcile", false, "apply SQLite peers onto live devices and exit")
-	iface := fs.String("interface", "", "WireGuard interface name")
+	iface := fs.String("interface", "", "WireGuard interface (required if YAML lists multiple; also for --remove)")
 	fs.Usage = printUsage
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		if err == flag.ErrHelp {
 			return nil
 		}
 		return err
-	}
-
-	if os.Geteuid() != 0 {
-		return fmt.Errorf("must run as root (try: sudo moorlan)")
 	}
 
 	modes := 0
@@ -61,7 +57,7 @@ func run() error {
 		return fmt.Errorf("specify --pair, --unpair, --remove, --list-peers, or --reconcile")
 	}
 	if modes > 1 {
-		return fmt.Errorf("use only one primary mode")
+		return fmt.Errorf("use only one of --pair, --unpair, --remove, --list-peers, or --reconcile")
 	}
 	if *peerPublicKey != "" && !*remove {
 		return fmt.Errorf("--peer-public-key is only valid with --remove")
@@ -76,6 +72,10 @@ func run() error {
 		if err := runtime.ValidateInterfaceName(*iface); err != nil {
 			return err
 		}
+	}
+
+	if os.Geteuid() != 0 {
+		return fmt.Errorf("must run as root (try: sudo moorlan)")
 	}
 
 	site, err := settings.Load()
@@ -132,14 +132,24 @@ func run() error {
 	}
 	idle := pair.NewIdle(pair.DefaultIdle)
 	defer idle.Stop()
+	notify := pair.Notify{
+		Paired: func(label, peerKey string) {
+			idle.Touch()
+			fmt.Fprintf(os.Stderr, "moorlan: paired %q (%s)\n", label, shortKey(peerKey))
+		},
+		Unpaired: func(peerKey string) {
+			idle.Touch()
+			fmt.Fprintf(os.Stderr, "moorlan: unpaired (%s)\n", shortKey(peerKey))
+		},
+	}
 	var text string
 	var handler http.Handler
 	if *unpair {
 		text, err = payload.MarshalUnpair(payload.UnpairCard{V: 1, Action: "unpair", ServerPublicKey: host.Snap.PublicKey, UnpairURL: controlURL})
-		handler = pair.NewUnpairOnly(assigner, idle.Touch)
+		handler = pair.NewUnpairOnly(assigner, notify)
 	} else {
 		text, err = payload.Marshal(payload.Card{V: 1, PairURL: controlURL, ServerPublicKey: host.Snap.PublicKey})
-		handler = pair.New(assigner, idle.Touch)
+		handler = pair.New(assigner, notify)
 	}
 	if err != nil {
 		return err
@@ -176,7 +186,7 @@ func run() error {
 		idle.Stop()
 		return shutdownHTTP()
 	case <-idle.Done():
-		fmt.Printf("\nmoorlan: idle for %s; stopping\n", pair.DefaultIdle)
+		fmt.Fprintf(os.Stderr, "moorlan: idle for 2 minutes; stopping\n")
 		return shutdownHTTP()
 	case err := <-errCh:
 		idle.Stop()
@@ -185,6 +195,14 @@ func run() error {
 		}
 		return err
 	}
+}
+
+func shortKey(key string) string {
+	key = strings.TrimSpace(key)
+	if len(key) <= 10 {
+		return key
+	}
+	return key[:4] + "…" + key[len(key)-4:]
 }
 
 func resolveSessionInterface(site settings.Site, storePath, ifaceFlag string, unpairOnly bool) (string, error) {
@@ -232,17 +250,21 @@ func runReconcile(ctx context.Context, site settings.Site, storePath, ifaceFlag 
 		fmt.Printf("nothing to reconcile (no interfaces in %s or %s)\n", settings.Path, storePath)
 		return nil
 	}
-	var failed int
+	var okCount, failed int
 	for _, name := range targets {
 		if err := reconcileOne(ctx, storePath, name); err != nil {
 			failed++
 			fmt.Fprintf(os.Stderr, "moorlan: reconcile %s: %v\n", name, err)
 			continue
 		}
+		okCount++
 		fmt.Printf("reconciled %s from %s\n", name, storePath)
 	}
 	if failed == len(targets) {
 		return fmt.Errorf("reconcile failed for every interface (%d)", failed)
+	}
+	if failed > 0 {
+		fmt.Fprintf(os.Stderr, "moorlan: reconciled %d/%d\n", okCount, len(targets))
 	}
 	return nil
 }
@@ -299,10 +321,14 @@ func printUsage() {
   moorlan --remove --interface <iface> --peer-public-key <key>
   moorlan --reconcile [--interface <iface>]
 
-Install the release binary to /usr/local/bin/moorlan and the example YAML to
-/usr/share/moorlan/moorlan.yaml.example (see server/README.md).
-Site conf /etc/moorlan/moorlan.yaml is NOT your wg-quick/networkd device file.
-Peers live in SQLite. Site settings come from the YAML file only.
+--pair / --unpair print a QR on stdout and serve LAN HTTP until idle (2 minutes
+with no success) or Ctrl-C. Success and errors go to stderr. Omit --interface
+when the site YAML lists exactly one WireGuard interface; required when it lists
+more than one. --unpair also accepts --interface for a iface that still has
+peers in the DB after removal from YAML. --remove always needs --interface.
+
+Site conf: /etc/moorlan/moorlan.yaml (not your wg-quick/networkd device file).
+Peers live in SQLite at /var/lib/moorlan/moorlan.db. See server/README.md.
 `)
 }
 
@@ -310,6 +336,10 @@ func printPeers(ctx context.Context, storePath, ifaceFilter string) error {
 	peers, err := runtime.ListPeers(ctx, storePath, ifaceFilter)
 	if err != nil {
 		return err
+	}
+	if len(peers) == 0 {
+		fmt.Fprintln(os.Stderr, "moorlan: no peers enrolled")
+		return nil
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "INTERFACE\tLABEL\tPUBLIC_KEY\tADDRESS")
