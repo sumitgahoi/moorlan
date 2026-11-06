@@ -117,6 +117,8 @@ jobs:
             ls -la dist >&2 || true
             exit 1
           fi
+          # Retags leave the old GitHub Release in place; replace it.
+          gh release delete "${GITHUB_REF_NAME}" --yes || true
           gh release create "${GITHUB_REF_NAME}" \
             "${assets[@]}" \
             --title "Moorlan server ${GITHUB_REF_NAME}" \
