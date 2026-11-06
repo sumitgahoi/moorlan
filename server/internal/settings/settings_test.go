@@ -17,7 +17,6 @@ func writeSite(t *testing.T, raw string) {
 
 func TestLoadRoundTripKeys(t *testing.T) {
 	writeSite(t, `
-db: /var/lib/moorlan/moorlan.db
 private-endpoint: 10.10.10.1:8756
 interfaces:
   moorlan0:
@@ -35,7 +34,7 @@ interfaces:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.DB != "/var/lib/moorlan/moorlan.db" || got.PrivateEndpoint != "10.10.10.1:8756" {
+	if got.PrivateEndpoint != "10.10.10.1:8756" {
 		t.Fatalf("root: %+v", got)
 	}
 	iface, ok := got.Lookup("moorlan0")
@@ -69,7 +68,6 @@ func TestLoadMissingHintsExample(t *testing.T) {
 
 func TestLoadRejectsUnknownKey(t *testing.T) {
 	writeSite(t, `
-db: /var/lib/moorlan/moorlan.db
 private-endpoint: 10.10.10.1:8756
 interfaces:
   wg0:
@@ -83,6 +81,21 @@ interfaces:
 	}
 }
 
+func TestLoadRejectsDbKey(t *testing.T) {
+	writeSite(t, `
+db: /tmp/x.db
+private-endpoint: 10.10.10.1:8756
+interfaces:
+  wg0:
+    public-endpoint: vpn.example:51820
+    home-networks: [10.10.0.0/24]
+    dns-servers: [10.10.10.1]
+`)
+	if _, err := Load(); err == nil {
+		t.Fatal("db key accepted")
+	}
+}
+
 func TestLoadRejectsLegacyAndMissingRequired(t *testing.T) {
 	writeSite(t, `
 private-endpoint: 10.10.10.1:8756
@@ -92,7 +105,6 @@ interfaces: {}
 		t.Fatal(err)
 	}
 	writeSite(t, `
-db: /tmp/x.db
 interfaces:
   wg0:
     public-endpoint: vpn.example:51820

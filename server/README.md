@@ -22,8 +22,8 @@ curl -fsSL https://github.com/sumitgahoi/moorlan/releases/latest/download/instal
 sudoedit /etc/moorlan/moorlan.yaml
 ```
 
-Comments in the file explain every key (`private-endpoint`, `public-endpoint`,
-`home-networks`, `dns-servers`, …). Then pair phones under Day to day.
+Edit `private-endpoint`, `public-endpoint`, `home-networks`, and DNS to match
+your LAN (see Site conf / Notes). Then pair phones under Day to day.
 
 **Upgrade:** re-run the download step (keeps your YAML and DB).
 
@@ -74,8 +74,9 @@ keep working and can still be unpaired.
 - Forward each WireGuard UDP port used in `public-endpoint`.
 - Per-iface `home-networks` must not overlap that iface’s tunnel subnet.
 - Hairpin protection is phone SSID-based.
-- LAN DNS: put AdGuard (or similar) in `dns-servers`, `dns-search: [home.arpa]`,
-  and include those subnets in `home-networks`.
+- DNS: point `dns-servers` at a resolver reachable over the tunnel (often the
+  server’s WireGuard address), set `dns-search: [home.arpa]`, and list only LAN
+  prefixes in `home-networks` (not the tunnel pool).
 - Paths: binary `/usr/local/bin/moorlan`, DB `/var/lib/moorlan/moorlan.db`,
   unit `moorlan-reconcile.service`.
 - Broken/missing DB: clear peers if possible → fix or replace DB and YAML →

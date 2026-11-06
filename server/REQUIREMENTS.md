@@ -28,7 +28,7 @@ system for operators and engineers.
 | Host (networkd / wg-quick / …) | WireGuard device: private key, address, listen port, routes, firewall | Peer enrollment |
 | Operator | Creates/edits `/etc/moorlan/moorlan.yaml` from the shipped example; enables the reconcile unit | Peer rows |
 | `/etc/moorlan/moorlan.yaml` | Static host + per-interface settings (source of truth for those settings) | Peers |
-| SQLite (`db` path) | **Source of truth for enrolled peers** and per-interface server public keys | Live kernel state |
+| SQLite (`/var/lib/moorlan/moorlan.db`) | **Source of truth for enrolled peers** and per-interface server public keys | Live kernel state |
 | Live WireGuard (wgctrl) | Projection of SQLite peers | Persistence |
 | systemd oneshot | Boot `--reconcile` across managed interfaces (bounded retries) | Long-running daemon |
 | Binary `/usr/local/bin/moorlan` | CLI; path invoked by the reconcile unit | Host networking; authoring YAML |
@@ -79,12 +79,11 @@ Invariants:
 ## 5. Site conf (YAML)
 
 - Canonical path only: `/etc/moorlan/moorlan.yaml`.
-- Shipped example: `/usr/share/moorlan/moorlan.yaml.example`.
-- The example MUST document every key with an inline comment: purpose,
-  constraints, and a concrete example (including `dns-search` / short names such
-  as `carbon` → `carbon.home.arpa`, and the public-DNS escape hatch). Optional
-  keys that are commented out MUST still carry their explanation.
-- Root keys: `db`, `private-endpoint`.
+- Shipped example: `/usr/share/moorlan/moorlan.yaml.example` — a minimal
+  template. Comments appear only where a key is ambiguous; full key docs live
+  here and in [README.md](README.md).
+- Root keys: `private-endpoint`. Peer DB path is fixed at
+  `/var/lib/moorlan/moorlan.db` (not a YAML key).
 - Under `interfaces.<name>`: `public-endpoint`, `home-networks`, `dns-servers`
   (required), `dns-search` (optional). Map key `<name>` is the WireGuard
   interface name.
@@ -102,10 +101,10 @@ Invariants:
   phone MUST use only lease DNS and search domains. No phone Settings override
   of DNS/search. No phone-invented Cloudflare (or other) fallback. Server conf
   is the sole DNS policy.
-- Canonical LAN DNS example: `home-networks` includes the host subnet(s) (e.g.
-  `10.10.10.0/24` and the AdGuard subnet); `dns-servers` lists the AdGuard IPv4;
-  `dns-search` includes `home.arpa`. In split tunnel the phone queries AdGuard
-  over the tunnel; `carbon` → `carbon.home.arpa` → `10.10.10.10`.
+- Canonical example: `dns-servers` lists the server WireGuard tunnel address
+  (e.g. `10.10.83.1`); `dns-search` includes `home.arpa`; `home-networks` lists
+  LAN prefixes only (not the tunnel pool). Short names resolve over the tunnel
+  (`carbon` → `carbon.home.arpa`).
 
 ## 6. Commands
 

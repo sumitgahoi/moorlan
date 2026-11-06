@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 
 	_ "modernc.org/sqlite"
 	"moorlan/internal/iface"
@@ -259,13 +258,4 @@ func ReconcileTargets(yamlNames, dbNames []string, ifaceFilter string) ([]string
 		return nil, fmt.Errorf("interface %s is not in site conf or the peer database", ifaceFilter)
 	}
 	return []string{ifaceFilter}, nil
-}
-
-// StorePath returns the configured DB path or the default host path.
-func StorePath(configured string) string {
-	configured = strings.TrimSpace(configured)
-	if configured != "" {
-		return configured
-	}
-	return DefaultStorePath
 }

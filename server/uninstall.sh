@@ -11,18 +11,10 @@ systemctl disable --now moorlan-reconcile.service 2>/dev/null || true
 rm -f /etc/systemd/system/moorlan-reconcile.service
 systemctl daemon-reload 2>/dev/null || true
 
-db=/var/lib/moorlan/moorlan.db
-if [[ -f /etc/moorlan/moorlan.yaml ]]; then
-  configured="$(awk -F': *' '/^db:/{print $2; exit}' /etc/moorlan/moorlan.yaml | tr -d '[:space:]')"
-  if [[ -n $configured ]]; then
-    db=$configured
-  fi
-fi
-
 rm -f /usr/local/bin/moorlan \
   /usr/share/moorlan/moorlan.yaml.example \
   /etc/moorlan/moorlan.yaml \
-  "$db"
+  /var/lib/moorlan/moorlan.db
 rmdir /usr/share/moorlan /etc/moorlan /var/lib/moorlan 2>/dev/null || true
 
 echo "Moorlan removed. WireGuard device unchanged."

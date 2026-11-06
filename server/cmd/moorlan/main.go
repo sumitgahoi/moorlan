@@ -82,7 +82,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	storePath := runtime.StorePath(site.DB)
+	storePath := runtime.DefaultStorePath
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

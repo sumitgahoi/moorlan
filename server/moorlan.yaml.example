@@ -1,60 +1,22 @@
-# Moorlan site settings (not a wg-quick/networkd file; peers live in SQLite).
-# Copy to /etc/moorlan/moorlan.yaml, edit, then enable moorlan-reconcile and run:
-#   sudo moorlan --pair
-# Installed example path: /usr/share/moorlan/moorlan.yaml.example
-
-# SQLite peer database path (source of truth for enrolled phones and per-iface
-# server public keys). One database for the host.
-db: /var/lib/moorlan/moorlan.db
-
-# LAN HTTP control plane for --pair / --unpair. Sticky private IPv4:port on a
-# non-WireGuard host interface; MUST lie inside the pairing interface's
-# home-networks. Shared for all interfaces. No ephemeral port.
-# Example: router/LAN address that phones can reach on home Wi-Fi.
+# Devices reach this to pair/unpair — LAN address inside home-networks below
 private-endpoint: 10.10.10.1:8756
 
-# WireGuard interfaces Moorlan may enroll peers on. Map key MUST match an
-# existing, up host device with exactly one private IPv4 (/16–/30).
-# Start each device with zero peers. private-endpoint above is shared; give each
-# interface its own public-endpoint (same hostname + different ports is fine).
 interfaces:
   wg0:
-    # Sticky public WireGuard endpoint returned on the pair lease (DDNS or static).
-    # Phones use this from away. Required; no STUN/UPnP/LAN-only fallback.
-    # host:port is the externally reachable mapping (may differ from local ListenPort).
+    # Externally reachable WG host:port
     public-endpoint: vpn.example.com:51820
 
-    # IPv4 prefixes phones route into the tunnel (split tunnel) for LAN access when away.
-    # Not hairpin / home Wi-Fi — hairpin is phone-local SSIDs. MUST NOT overlap the
-    # tunnel subnet. Include every LAN you want reachable (and the subnet that hosts
-    # your DNS resolver). Order = preference.
+    # Subnets to reach your LAN when away
     home-networks:
       - 10.10.0.0/24
       - 10.10.10.0/24
       - 10.10.20.0/24
+      - 10.10.30.0/24
+      - 10.10.40.0/24
 
-    # Required DNS resolvers for the tunnel (unicast IPv4). Order = preference.
-    # Point at the LAN resolver that serves home.arpa (often the router itself), and
-    # include that host’s subnet in home-networks above. Example: router DNS:
     dns-servers:
-      - 10.10.10.1
-    # Or a dedicated resolver (AdGuard/Pi-hole) on the LAN, e.g. 10.10.10.53.
-    # Public-only escape hatch (no local names):
-    # dns-servers:
-    #   - 1.1.1.1
-    #   - 1.0.0.1
+      - 10.10.83.1
 
-    # Optional DNS search domains. Short name "carbon" becomes carbon.home.arpa
-    # when search is home.arpa. Requires dns-servers.
+    # Optional; carbon → carbon.home.arpa
     dns-search:
       - home.arpa
-
-  # Example second interface (uncomment and edit if needed):
-  # wg1:
-  #   public-endpoint: vpn.example.com:51821
-  #   home-networks:
-  #     - 10.10.0.0/24
-  #   dns-servers:
-  #     - 10.10.10.1
-  #   dns-search:
-  #     - home.arpa

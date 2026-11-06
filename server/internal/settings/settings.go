@@ -19,7 +19,6 @@ const ExamplePath = "/usr/share/moorlan/moorlan.yaml.example"
 
 // Site is the static host configuration.
 type Site struct {
-	DB              string
 	PrivateEndpoint string
 	Interfaces      map[string]Interface
 }
@@ -34,9 +33,8 @@ type Interface struct {
 }
 
 type file struct {
-	DB              string                `yaml:"db"`
-	PrivateEndpoint string                `yaml:"private-endpoint"`
-	Interfaces      map[string]ifaceFile  `yaml:"interfaces"`
+	PrivateEndpoint string               `yaml:"private-endpoint"`
+	Interfaces      map[string]ifaceFile `yaml:"interfaces"`
 }
 
 type ifaceFile struct {
@@ -63,7 +61,6 @@ func Load() (Site, error) {
 		return Site{}, fmt.Errorf("%s: %w", Path, err)
 	}
 	site := Site{
-		DB:              strings.TrimSpace(decoded.DB),
 		PrivateEndpoint: strings.TrimSpace(decoded.PrivateEndpoint),
 		Interfaces:      map[string]Interface{},
 	}

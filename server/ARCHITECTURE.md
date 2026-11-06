@@ -81,7 +81,7 @@ sequenceDiagram
 ```
 
 - YAML at `/etc/moorlan/moorlan.yaml` MUST already exist (hint example path if missing).
-- SQLite is created or opened as needed under the configured `db` path.
+- SQLite is created or opened as needed at `/var/lib/moorlan/moorlan.db`.
 - First successful use of an interface inserts `interfaces(name, server_public_key)` from the live device; that key is immutable thereafter.
 
 ### Pair
@@ -115,9 +115,9 @@ sequenceDiagram
 
 | Path | Content |
 | --- | --- |
-| `/etc/moorlan/moorlan.yaml` | `db`, `private-endpoint`; per-iface `public-endpoint`, `home-networks`, `dns-servers`, optional `dns-search` |
-| `/usr/share/moorlan/moorlan.yaml.example` | Documented example (every key commented) |
-| `/var/lib/moorlan/moorlan.db` (or `db`) | Interfaces + peers SoT |
+| `/etc/moorlan/moorlan.yaml` | `private-endpoint`; per-iface `public-endpoint`, `home-networks`, `dns-servers`, optional `dns-search` |
+| `/usr/share/moorlan/moorlan.yaml.example` | Minimal site template (comments only where ambiguous) |
+| `/var/lib/moorlan/moorlan.db` | Interfaces + peers SoT |
 | `/etc/systemd/system/moorlan-reconcile.service` | Boot reconcile oneshot |
 | `/run/moorlan-<iface>.lock` | flock |
 | `/usr/local/bin/moorlan` | Binary path used by the unit |
