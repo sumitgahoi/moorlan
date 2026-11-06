@@ -64,15 +64,15 @@ jobs:
           if-no-files-found: error
 
   example-conf:
-    name: Example conf
+    name: Example YAML
     needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/upload-artifact@v4
         with:
-          name: moorlan-conf-example
-          path: server/moorlan.conf.example
+          name: moorlan-yaml-example
+          path: server/moorlan.yaml.example
           if-no-files-found: error
 
   release:
@@ -95,7 +95,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           shopt -s nullglob
-          assets=(dist/moorlan-linux-* dist/moorlan.conf.example)
+          assets=(dist/moorlan-linux-* dist/moorlan.yaml.example)
           if [ ${#assets[@]} -lt 2 ]; then
             echo "missing release assets" >&2
             ls -la dist >&2 || true

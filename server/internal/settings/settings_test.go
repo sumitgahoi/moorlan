@@ -2,104 +2,137 @@ package settings
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func TestLoadRoundTripKeys(t *testing.T) {
-	Dir = t.TempDir()
-	path := Path("moorlan0")
-	raw := strings.Join([]string{
-		"interface=moorlan0",
-		"db=/var/lib/moorlan/moorlan0.db",
-		"private-endpoint=10.10.10.1:8756",
-		"home-networks=10.10.0.0/24,10.10.10.0/24",
-		"public-endpoint=vpn.example:51820",
-		"dns-servers=10.10.10.1,1.1.1.1",
-		"dns-search=home.arpa",
-		"",
-	}, "\n")
-	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+func writeSite(t *testing.T, raw string) {
+	t.Helper()
+	Path = filepath.Join(t.TempDir(), "moorlan.yaml")
+	if err := os.WriteFile(Path, []byte(raw), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got, err := Load("moorlan0")
+}
+
+func TestLoadRoundTripKeys(t *testing.T) {
+	writeSite(t, `
+db: /var/lib/moorlan/moorlan.db
+private-endpoint: 10.10.10.1:8756
+interfaces:
+  moorlan0:
+    public-endpoint: vpn.example:51820
+    home-networks:
+      - 10.10.0.0/24
+      - 10.10.10.0/24
+    dns-servers:
+      - 10.10.10.1
+      - 1.1.1.1
+    dns-search:
+      - home.arpa
+`)
+	got, err := Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := Site{
-		Interface:       "moorlan0",
-		DB:              "/var/lib/moorlan/moorlan0.db",
-		PrivateEndpoint: "10.10.10.1:8756",
-		HomeNetworks:    "10.10.0.0/24,10.10.10.0/24",
-		PublicEndpoint:  "vpn.example:51820",
-		DNSServers:      "10.10.10.1,1.1.1.1",
-		DNSSearch:       "home.arpa",
+	if got.DB != "/var/lib/moorlan/moorlan.db" || got.PrivateEndpoint != "10.10.10.1:8756" {
+		t.Fatalf("root: %+v", got)
 	}
-	if got != want {
-		t.Fatalf("got %+v want %+v", got, want)
+	iface, ok := got.Lookup("moorlan0")
+	if !ok {
+		t.Fatal("missing iface")
+	}
+	if iface.PublicEndpoint != "vpn.example:51820" {
+		t.Fatalf("public-endpoint: %q", iface.PublicEndpoint)
+	}
+	if len(iface.HomeNetworks) != 2 || iface.HomeNetworks[0] != "10.10.0.0/24" || iface.HomeNetworks[1] != "10.10.10.0/24" {
+		t.Fatalf("home-networks: %v", iface.HomeNetworks)
+	}
+	if len(iface.DNSServers) != 2 || iface.DNSServers[0] != "10.10.10.1" || iface.DNSServers[1] != "1.1.1.1" {
+		t.Fatalf("dns-servers: %v", iface.DNSServers)
+	}
+	if len(iface.DNSSearch) != 1 || iface.DNSSearch[0] != "home.arpa" {
+		t.Fatalf("dns-search: %v", iface.DNSSearch)
 	}
 }
 
 func TestLoadMissingHintsExample(t *testing.T) {
-	Dir = t.TempDir()
-	_, err := Load("moorlan1")
+	Path = filepath.Join(t.TempDir(), "missing.yaml")
+	_, err := Load()
 	if err == nil {
 		t.Fatal("missing conf accepted")
 	}
-	if !strings.Contains(err.Error(), Path("moorlan1")) || !strings.Contains(err.Error(), ExamplePath) {
+	if !strings.Contains(err.Error(), Path) || !strings.Contains(err.Error(), ExamplePath) {
 		t.Fatalf("missing-conf hint: %v", err)
 	}
 }
 
-func TestLoadRejectsUnknownKeyAndMismatchedInterface(t *testing.T) {
-	Dir = t.TempDir()
-	path := Path("moorlan0")
-	if err := os.WriteFile(path, []byte("interface=moorlan0\npeers=bad\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Load("moorlan0"); err == nil {
+func TestLoadRejectsUnknownKey(t *testing.T) {
+	writeSite(t, `
+db: /var/lib/moorlan/moorlan.db
+private-endpoint: 10.10.10.1:8756
+interfaces:
+  wg0:
+    public-endpoint: vpn.example:51820
+    home-networks: [10.10.0.0/24]
+    dns-servers: [10.10.10.1]
+    peers: bad
+`)
+	if _, err := Load(); err == nil {
 		t.Fatal("unknown key accepted")
 	}
-	if err := os.WriteFile(path, []byte("interface=moorlan1\n"), 0o600); err != nil {
+}
+
+func TestLoadRejectsLegacyAndMissingRequired(t *testing.T) {
+	writeSite(t, `
+private-endpoint: 10.10.10.1:8756
+interfaces: {}
+`)
+	if _, err := Load(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Load("moorlan0"); err == nil {
-		t.Fatal("mismatched interface accepted")
+	writeSite(t, `
+db: /tmp/x.db
+interfaces:
+  wg0:
+    public-endpoint: vpn.example:51820
+    home-networks: [10.10.0.0/24]
+    dns-servers: [10.10.10.1]
+`)
+	if _, err := Load(); err == nil {
+		t.Fatal("missing private-endpoint accepted")
+	}
+	writeSite(t, `
+private-endpoint: 10.10.10.1:8756
+interfaces:
+  wg0:
+    home-networks: [10.10.0.0/24]
+    dns-servers: [10.10.10.1]
+`)
+	if _, err := Load(); err == nil {
+		t.Fatal("missing public-endpoint accepted")
 	}
 }
 
-func TestLoadRejectsLegacyKeys(t *testing.T) {
-	Dir = t.TempDir()
-	path := Path("moorlan0")
-	for _, raw := range []string{
-		"interface=moorlan0\nwg=moorlan0\n",
-		"interface=moorlan0\nhome-cidrs=10.10.0.0/24\n",
-		"interface=moorlan0\ndns=10.10.10.1\n",
-		"interface=moorlan0\nunit=networkd\n",
-	} {
-		if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := Load("moorlan0"); err == nil {
-			t.Fatalf("legacy key accepted in %q", raw)
-		}
-	}
-}
-
-func TestListIfaceNames(t *testing.T) {
-	Dir = t.TempDir()
-	names, err := ListIfaceNames()
-	if err != nil || len(names) != 0 {
-		t.Fatalf("%v %v", names, err)
-	}
-	if err := os.WriteFile(Path("wg0"), []byte("interface=wg0\n"), 0o600); err != nil {
+func TestInterfaceNamesStableOrder(t *testing.T) {
+	writeSite(t, `
+private-endpoint: 10.10.10.1:8756
+interfaces:
+  wg1:
+    public-endpoint: vpn.example:51821
+    home-networks: [10.10.0.0/24]
+    dns-servers: [10.10.10.1]
+  wg0:
+    public-endpoint: vpn.example:51820
+    home-networks: [10.10.0.0/24]
+    dns-servers: [10.10.10.1]
+`)
+	got, err := Load()
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(Path("wg1"), []byte("interface=wg1\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	names, err = ListIfaceNames()
-	if err != nil || len(names) != 2 || names[0] != "wg0" || names[1] != "wg1" {
-		t.Fatalf("%v %v", names, err)
+	names := got.InterfaceNames()
+	if len(names) != 2 || names[0] != "wg0" || names[1] != "wg1" {
+		t.Fatalf("%v", names)
 	}
 }

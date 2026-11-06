@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 
 	_ "modernc.org/sqlite"
 	"moorlan/internal/iface"
@@ -14,70 +16,42 @@ import (
 
 type peerStore struct{ db *sql.DB }
 
-// initStore exclusively creates a new database; it never replaces existing state.
-func initStore(path, serverKey string, livePeers int) error {
-	if livePeers != 0 {
-		return fmt.Errorf("cannot initialize database while the WireGuard interface has %d live peer(s); remove them, then pair through the app", livePeers)
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0600)
-	if err != nil {
-		return fmt.Errorf("initialize database %s (must not already exist): %w", path, err)
-	}
-	if err = file.Close(); err != nil {
-		_ = os.Remove(path)
-		return err
-	}
-	db, err := connectStore(path)
-	if err != nil {
-		_ = os.Remove(path)
-		return err
-	}
-	defer db.Close()
-	tx, err := db.Begin()
-	if err == nil {
-		defer tx.Rollback()
-		_, err = tx.Exec(`
- CREATE TABLE IF NOT EXISTS metadata (server_key TEXT NOT NULL);
- CREATE TABLE IF NOT EXISTS peers (public_key TEXT PRIMARY KEY NOT NULL, address TEXT UNIQUE NOT NULL, label TEXT NOT NULL DEFAULT '');`)
-		if err == nil {
-			_, err = tx.Exec("INSERT INTO metadata(server_key) VALUES (?)", serverKey)
-		}
-		if err == nil {
-			err = tx.Commit()
-		}
-	}
-	if err != nil {
-		return err
-	}
-	// Persist the new directory entry as well as SQLite's committed contents.
-	dir, err := os.Open(filepath.Dir(path))
-	if err != nil {
-		return err
-	}
-	defer dir.Close()
-	return dir.Sync()
-}
+const schemaSQL = `
+CREATE TABLE IF NOT EXISTS interfaces (
+  name TEXT PRIMARY KEY NOT NULL,
+  server_public_key TEXT NOT NULL UNIQUE
+);
+CREATE TABLE IF NOT EXISTS peers (
+  interface_id TEXT NOT NULL REFERENCES interfaces(name),
+  public_key TEXT NOT NULL,
+  address TEXT NOT NULL,
+  label TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (interface_id, public_key),
+  UNIQUE (interface_id, address)
+);`
 
-// connectStore uses SQLite's read/write-only mode, so SQLite cannot recreate a
-// missing file even if it disappears between the filesystem check and opening.
-func connectStore(path string) (*sql.DB, error) {
-	file, err := os.OpenFile(path, os.O_RDWR, 0)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("database %s does not exist; run --add-interface", path)
-		}
-		return nil, err
-	}
-	err = file.Chmod(0600)
-	file.Close()
-	if err != nil {
+// openStore opens or creates the host peer database.
+func openStore(path string) (*peerStore, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
 	abs, err := filepath.Abs(path)
 	if err != nil {
+		return nil, err
+	}
+	if _, err := os.Stat(abs); err != nil {
+		if !os.IsNotExist(err) {
+			return nil, err
+		}
+		file, err := os.OpenFile(abs, os.O_CREATE|os.O_RDWR, 0600)
+		if err != nil {
+			return nil, fmt.Errorf("create database %s: %w", path, err)
+		}
+		if err := file.Close(); err != nil {
+			_ = os.Remove(abs)
+			return nil, err
+		}
+	} else if err := os.Chmod(abs, 0600); err != nil {
 		return nil, err
 	}
 	dsn := (&url.URL{Scheme: "file", Path: abs, RawQuery: "mode=rw"}).String()
@@ -86,71 +60,63 @@ func connectStore(path string) (*sql.DB, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	// FULL commits make an assignment durable before it reaches WireGuard.
-	if _, err = db.Exec("PRAGMA synchronous=FULL"); err != nil {
-		db.Close()
-		return nil, err
-	}
-	return db, nil
-}
-
-func openStore(path, serverKey string) (*peerStore, error) {
-	db, err := connectStore(path)
-	if err != nil {
-		return nil, err
-	}
 	fail := func(err error) (*peerStore, error) { db.Close(); return nil, err }
-	var storedKey string
-	err = db.QueryRow("SELECT server_key FROM metadata LIMIT 1").Scan(&storedKey)
-	if err != nil {
-		return fail(fmt.Errorf("database %s is not initialized or cannot be read; run --remove-interface then --add-interface and re-pair: %w", path, err))
-	}
-	if storedKey != serverKey {
-		return fail(fmt.Errorf("WireGuard server key changed; database belongs to a different server identity"))
-	}
-	if err = ensurePeerLabelColumn(db); err != nil {
+	if _, err = db.Exec("PRAGMA synchronous=FULL"); err != nil {
 		return fail(err)
 	}
-	// Drop legacy deletion journal if an older database still has it.
+	if _, err = db.Exec("PRAGMA foreign_keys=ON"); err != nil {
+		return fail(err)
+	}
+	if _, err = db.Exec(schemaSQL); err != nil {
+		return fail(err)
+	}
+	// Drop legacy tables/columns from older single-iface databases if present.
 	if _, err = db.Exec(`DROP TABLE IF EXISTS pending_removals`); err != nil {
+		return fail(err)
+	}
+	if _, err = db.Exec(`DROP TABLE IF EXISTS metadata`); err != nil {
 		return fail(err)
 	}
 	return &peerStore{db: db}, nil
 }
 
-func ensurePeerLabelColumn(db *sql.DB) error {
-	rows, err := db.Query(`PRAGMA table_info(peers)`)
+// bindInterface records or verifies the sticky server public key for iface.
+// The key is set once on first successful use and must not change.
+func (s *peerStore) bindInterface(ctx context.Context, name, serverKey string) error {
+	var stored string
+	err := s.db.QueryRowContext(ctx, `SELECT server_public_key FROM interfaces WHERE name=?`, name).Scan(&stored)
+	if err == sql.ErrNoRows {
+		_, err = s.db.ExecContext(ctx, `INSERT INTO interfaces(name, server_public_key) VALUES (?,?)`, name, serverKey)
+		return err
+	}
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
-	hasLabel := false
-	for rows.Next() {
-		var cid int
-		var name, ctype string
-		var notNull, pk int
-		var dflt sql.NullString
-		if err := rows.Scan(&cid, &name, &ctype, &notNull, &dflt, &pk); err != nil {
-			return err
-		}
-		if name == "label" {
-			hasLabel = true
-		}
+	if stored != serverKey {
+		return fmt.Errorf("WireGuard server key for %s does not match the database; refusing to operate on this interface", name)
 	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	if !hasLabel {
-		if _, err := db.Exec(`ALTER TABLE peers ADD COLUMN label TEXT NOT NULL DEFAULT ''`); err != nil {
-			return err
-		}
-	}
-	_, err = db.Exec(`DROP INDEX IF EXISTS peers_label_unique`)
-	return err
+	return nil
 }
 
-func (s *peerStore) list(ctx context.Context) ([]iface.Peer, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT public_key,address,label FROM peers ORDER BY public_key")
+func (s *peerStore) interfaceNames(ctx context.Context) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT name FROM interfaces ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		out = append(out, name)
+	}
+	return out, rows.Err()
+}
+
+func (s *peerStore) list(ctx context.Context, ifaceName string) ([]iface.Peer, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT public_key,address,label FROM peers WHERE interface_id=? ORDER BY public_key`, ifaceName)
 	if err != nil {
 		return nil, err
 	}
@@ -166,19 +132,54 @@ func (s *peerStore) list(ctx context.Context) ([]iface.Peer, error) {
 	return out, rows.Err()
 }
 
-func (s *peerStore) insert(ctx context.Context, key, address, label string) error {
-	_, err := s.db.ExecContext(ctx, "INSERT INTO peers(public_key,address,label) VALUES (?,?,?)", key, address, label)
+// ListedPeer is one enrolled peer for --list-peers.
+type ListedPeer struct {
+	Interface string
+	PublicKey string
+	Address   string
+	Label     string
+}
+
+func (s *peerStore) listAll(ctx context.Context, ifaceFilter string) ([]ListedPeer, error) {
+	var (
+		rows *sql.Rows
+		err  error
+	)
+	if ifaceFilter == "" {
+		rows, err = s.db.QueryContext(ctx, `SELECT interface_id,public_key,address,label FROM peers ORDER BY interface_id, public_key`)
+	} else {
+		rows, err = s.db.QueryContext(ctx, `SELECT interface_id,public_key,address,label FROM peers WHERE interface_id=? ORDER BY public_key`, ifaceFilter)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ListedPeer
+	for rows.Next() {
+		var p ListedPeer
+		if err := rows.Scan(&p.Interface, &p.PublicKey, &p.Address, &p.Label); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+func (s *peerStore) insert(ctx context.Context, ifaceName, key, address, label string) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO peers(interface_id,public_key,address,label) VALUES (?,?,?,?)`, ifaceName, key, address, label)
 	return err
 }
-func (s *peerStore) setLabel(ctx context.Context, key, label string) error {
-	_, err := s.db.ExecContext(ctx, "UPDATE peers SET label=? WHERE public_key=?", label, key)
+
+func (s *peerStore) setLabel(ctx context.Context, ifaceName, key, label string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE peers SET label=? WHERE interface_id=? AND public_key=?`, label, ifaceName, key)
 	return err
 }
-func (s *peerStore) lookupPublicKey(ctx context.Context, key string) (iface.Peer, error) {
+
+func (s *peerStore) lookupPublicKey(ctx context.Context, ifaceName, key string) (iface.Peer, error) {
 	var address, label string
-	err := s.db.QueryRowContext(ctx, "SELECT address,label FROM peers WHERE public_key=?", key).Scan(&address, &label)
+	err := s.db.QueryRowContext(ctx, `SELECT address,label FROM peers WHERE interface_id=? AND public_key=?`, ifaceName, key).Scan(&address, &label)
 	if err == sql.ErrNoRows {
-		return iface.Peer{}, fmt.Errorf("no managed peer with public key %q", key)
+		return iface.Peer{}, fmt.Errorf("no managed peer with public key %q on %s", key, ifaceName)
 	}
 	if err != nil {
 		return iface.Peer{}, err
@@ -187,8 +188,8 @@ func (s *peerStore) lookupPublicKey(ctx context.Context, key string) (iface.Peer
 }
 
 // delete removes the peer row. It returns whether a row was deleted.
-func (s *peerStore) delete(ctx context.Context, key string) (bool, error) {
-	res, err := s.db.ExecContext(ctx, "DELETE FROM peers WHERE public_key=?", key)
+func (s *peerStore) delete(ctx context.Context, ifaceName, key string) (bool, error) {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM peers WHERE interface_id=? AND public_key=?`, ifaceName, key)
 	if err != nil {
 		return false, err
 	}
@@ -199,15 +200,72 @@ func (s *peerStore) delete(ctx context.Context, key string) (bool, error) {
 	return n > 0, nil
 }
 
-// CountPeers returns how many peer rows exist.
-func CountPeers(path string) (peers int, err error) {
-	db, err := connectStore(path)
+// ListPeers returns enrolled peers from SQLite (optionally filtered by interface).
+func ListPeers(ctx context.Context, storePath, ifaceFilter string) ([]ListedPeer, error) {
+	if _, err := os.Stat(storePath); err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	store, err := openStore(storePath)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	defer db.Close()
-	if err = db.QueryRow(`SELECT COUNT(*) FROM peers`).Scan(&peers); err != nil {
-		return 0, err
+	defer store.db.Close()
+	return store.listAll(ctx, ifaceFilter)
+}
+
+// ListDBInterfaces returns interface names recorded in the database.
+// Missing database yields an empty list.
+func ListDBInterfaces(storePath string) ([]string, error) {
+	if _, err := os.Stat(storePath); err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
 	}
-	return peers, nil
+	store, err := openStore(storePath)
+	if err != nil {
+		return nil, err
+	}
+	defer store.db.Close()
+	return store.interfaceNames(context.Background())
+}
+
+// ReconcileTargets returns the stable-ordered set of interfaces to reconcile:
+// YAML names ∪ DB names, optionally filtered to one interface.
+func ReconcileTargets(yamlNames, dbNames []string, ifaceFilter string) ([]string, error) {
+	seen := map[string]bool{}
+	var out []string
+	add := func(name string) {
+		if name == "" || seen[name] {
+			return
+		}
+		seen[name] = true
+		out = append(out, name)
+	}
+	for _, name := range yamlNames {
+		add(name)
+	}
+	for _, name := range dbNames {
+		add(name)
+	}
+	sort.Strings(out)
+	if ifaceFilter == "" {
+		return out, nil
+	}
+	if !seen[ifaceFilter] {
+		return nil, fmt.Errorf("interface %s is not in site conf or the peer database", ifaceFilter)
+	}
+	return []string{ifaceFilter}, nil
+}
+
+// StorePath returns the configured DB path or the default host path.
+func StorePath(configured string) string {
+	configured = strings.TrimSpace(configured)
+	if configured != "" {
+		return configured
+	}
+	return DefaultStorePath
 }

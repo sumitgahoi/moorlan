@@ -16,19 +16,20 @@ the pairing port or run pair/unpair on guest Wi‑Fi. Those modes idle-stop afte
 
 | Setting | Requirement |
 | --- | --- |
-| Interface | Existing up WG device; **zero peers** at `--add-interface` |
-| Tunnel address | Exactly one private IPv4, `/16`–`/30` |
-| `home-networks` | Private IPv4 prefixes for split-tunnel LAN access |
-| `public-endpoint` | Sticky DDNS or static `host:port` |
-| `dns-servers` | Required; one or more unicast IPv4 resolvers |
-| Site conf | `/etc/moorlan/<iface>.conf` (not a wg-quick file) |
-| Peers DB | `/var/lib/moorlan/<iface>.db` (or `db=` in conf) |
+| Interface | Existing up WG device with exactly one private IPv4 (`/16`–`/30`) |
+| Peers on device | Start with **zero peers** on each WG device you list in YAML |
+| Tunnel address | Exactly one private IPv4 on the device |
+| `home-networks` | Private IPv4 prefixes for split-tunnel LAN access (per iface) |
+| `public-endpoint` | Sticky DDNS or static `host:port` per iface |
+| `dns-servers` | Required; one or more unicast IPv4 resolvers (per iface) |
+| Site conf | `/etc/moorlan/moorlan.yaml` |
+| Peers DB | `/var/lib/moorlan/moorlan.db` (or `db` in YAML) |
 | Binary | `/usr/local/bin/moorlan` (reconcile unit calls this path) |
 | Privileges | Root |
 | Phone address | Auto `/32` in the tunnel subnet |
 
-Create and firewall the WG device yourself. After `--add-interface`, Moorlan owns
-every peer on it.
+Create and firewall the WG device yourself. List it under `interfaces` in YAML;
+Moorlan enrolls peers in SQLite and reconciles them onto the live device.
 
 ## Install
 
@@ -41,15 +42,17 @@ curl -fsSL -o "${ASSET}" "${BASE}/${ASSET}"
 curl -fsSL -o "${ASSET}.sha256" "${BASE}/${ASSET}.sha256"
 sha256sum -c "${ASSET}.sha256"
 sudo install -m 755 "${ASSET}" /usr/local/bin/moorlan
-curl -fsSL -o moorlan.conf.example "${BASE}/moorlan.conf.example"
+curl -fsSL -o moorlan.yaml.example "${BASE}/moorlan.yaml.example"
 sudo mkdir -p /usr/share/moorlan
-sudo install -m 644 moorlan.conf.example /usr/share/moorlan/moorlan.conf.example
+sudo install -m 644 moorlan.yaml.example /usr/share/moorlan/moorlan.yaml.example
 
 sudo mkdir -p /etc/moorlan
-sudo cp /usr/share/moorlan/moorlan.conf.example /etc/moorlan/wg0.conf
-# edit /etc/moorlan/wg0.conf
-sudo moorlan --add-interface wg0
-sudo moorlan --pair --interface wg0
+sudo cp /usr/share/moorlan/moorlan.yaml.example /etc/moorlan/moorlan.yaml
+# edit /etc/moorlan/moorlan.yaml
+sudo install -m 644 systemd/moorlan-reconcile.service /etc/systemd/system/moorlan-reconcile.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now moorlan-reconcile.service
+sudo moorlan --pair
 ```
 
 From source:
@@ -59,52 +62,53 @@ cd server
 go build -o moorlan ./cmd/moorlan
 sudo install -m 755 moorlan /usr/local/bin/moorlan
 sudo mkdir -p /usr/share/moorlan
-sudo install -m 644 moorlan.conf.example /usr/share/moorlan/moorlan.conf.example
+sudo install -m 644 moorlan.yaml.example /usr/share/moorlan/moorlan.yaml.example
+sudo install -m 644 systemd/moorlan-reconcile.service /etc/systemd/system/moorlan-reconcile.service
 ```
 
-**Upgrade:** replace the binary (and example conf if changed); site conf, DB, and
-units stay. **Remove program:** `--remove-interface` per iface first, then delete
-the binary.
+**Upgrade:** replace the binary (and example YAML / unit if changed); site YAML
+and DB stay. **Remove program:** unpair peers, stop/disable the unit, then delete
+the binary, YAML, and DB as desired.
 
 ## Day to day
 
 ```bash
-sudo moorlan --pair --interface wg0
-sudo moorlan --list-peers --interface wg0
+sudo moorlan --pair                          # sole iface in YAML; else add --interface
+sudo moorlan --list-peers
 sudo moorlan --unpair --interface wg0
 sudo moorlan --remove --interface wg0 --peer-public-key '<device-public-key>'
-sudo moorlan --reconcile --interface wg0
-sudo moorlan --remove-interface wg0   # after all peers are gone
+sudo moorlan --reconcile
 ```
 
 | Command | Role |
 | --- | --- |
-| `--add-interface` | Validate site conf; create DB + reconcile unit |
-| `--remove-interface` | Delete DB, conf, unit (refuses if peers remain) |
 | `--pair` / `--unpair` | Enrollment / unpair QR; idle-stop 2m |
 | `--list-peers` | Label, public key, address |
 | `--remove` | Admin revoke by peer public key |
-| `--reconcile` | SQLite → live (also boot oneshot) |
+| `--reconcile` | SQLite → live for all managed ifaces (also boot oneshot) |
 
 Success criteria: [REQUIREMENTS.md](REQUIREMENTS.md) §6.
 
 ## Site conf
 
-Edit `/etc/moorlan/<iface>.conf`. Full key comments:
-`/usr/share/moorlan/moorlan.conf.example`. Conf is the only source of site
-settings (no CLI overrides). Changes to `home-networks`, `dns-servers`,
-`dns-search`, or endpoints apply to **new** pair leases — re-pair phones to
-refresh existing ones.
+Edit `/etc/moorlan/moorlan.yaml`. Full key comments:
+`/usr/share/moorlan/moorlan.yaml.example`. YAML is the only source of site
+settings (no CLI overrides). Root `private-endpoint` is shared; each interface
+has its own `public-endpoint`, `home-networks`, and DNS. Changes to those fields
+apply to **new** pair leases — re-pair phones to refresh existing ones.
 
-## Ownership
+If you remove an interface from YAML, new enroll fails for it; existing peers
+keep working and can still be unpaired.
+
+## Roles
 
 | Owner | Responsibility |
 | --- | --- |
 | Host (networkd / wg-quick / …) | Device: key, address, listen port, routes, firewall |
-| Operator | `/etc/moorlan/<iface>.conf` |
-| SQLite | Enrolled peers (SoT) |
+| Operator | `/etc/moorlan/moorlan.yaml`; enable reconcile unit |
+| SQLite | Enrolled peers and per-iface server public keys (SoT) |
 | Live wgctrl | Projection of SQLite |
-| systemd oneshot | Boot `--reconcile --interface <iface>` (~5 min retry window) |
+| systemd oneshot | Boot `moorlan --reconcile` (~5 min retry window; soft-fail per iface) |
 
 ## Protocol
 
@@ -119,13 +123,13 @@ clears the profile. Details: [REQUIREMENTS.md](REQUIREMENTS.md) §7.
 
 ## Notes
 
-- Forward the WireGuard UDP port.
-- `home-networks` must not overlap the tunnel subnet.
+- Forward each WireGuard UDP port used in `public-endpoint`.
+- Per-iface `home-networks` must not overlap that iface’s tunnel subnet.
 - Hairpin protection is phone SSID-based.
-- LAN DNS example: AdGuard in `dns-servers`, `dns-search=home.arpa`, include those
-  subnets in `home-networks`.
-- Broken/missing DB: clear peers if possible → `--remove-interface` → fix conf →
-  `--add-interface` → re-pair. Non-goals: [REQUIREMENTS.md](REQUIREMENTS.md) §9.
+- LAN DNS example: AdGuard in `dns-servers`, `dns-search: [home.arpa]`, include
+  those subnets in `home-networks`.
+- Broken/missing DB: clear peers if possible → fix or replace DB and YAML →
+  re-pair. Non-goals: [REQUIREMENTS.md](REQUIREMENTS.md) §9.
 
 ## Development
 
@@ -134,7 +138,7 @@ go test -race ./...
 go vet ./...
 go build -o moorlan ./cmd/moorlan
 sudo install -m 755 moorlan /usr/local/bin/moorlan
-sudo install -m 644 moorlan.conf.example /usr/share/moorlan/moorlan.conf.example
+sudo install -m 644 moorlan.yaml.example /usr/share/moorlan/moorlan.yaml.example
 ```
 
 Pushing a `v*` tag runs `.github/workflows/server-release.yml` (linux amd64/arm64

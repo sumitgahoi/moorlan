@@ -122,7 +122,7 @@ func (a *Assigner) removeManaged(ctx context.Context, client wireguardClient, pu
 		}
 	}
 
-	deleted, err := a.store.delete(ctx, publicKey)
+	deleted, err := a.store.delete(ctx, a.Host.Snap.Name, publicKey)
 	if err != nil {
 		return err
 	}

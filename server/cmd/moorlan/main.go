@@ -7,9 +7,7 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"os/signal"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -21,7 +19,6 @@ import (
 	"moorlan/internal/qr"
 	"moorlan/internal/runtime"
 	"moorlan/internal/settings"
-	"moorlan/systemd"
 )
 
 func main() {
@@ -39,9 +36,7 @@ func run() error {
 	remove := fs.Bool("remove", false, "remove a managed peer by WireGuard public key and exit")
 	peerPublicKey := fs.String("peer-public-key", "", "peer WireGuard public key (with --remove)")
 	listPeers := fs.Bool("list-peers", false, "print enrolled peers (label, public key, address) and exit")
-	reconcile := fs.Bool("reconcile", false, "apply SQLite peers onto the live device and exit")
-	addIface := fs.String("add-interface", "", "validate site conf; create DB + reconcile unit")
-	removeIface := fs.String("remove-interface", "", "remove Moorlan conf, empty peer DB, and reconcile unit; keep the host device")
+	reconcile := fs.Bool("reconcile", false, "apply SQLite peers onto live devices and exit")
 	iface := fs.String("interface", "", "WireGuard interface name")
 	fs.Usage = printUsage
 	if err := fs.Parse(os.Args[1:]); err != nil {
@@ -61,15 +56,9 @@ func run() error {
 			modes++
 		}
 	}
-	if *addIface != "" {
-		modes++
-	}
-	if *removeIface != "" {
-		modes++
-	}
 	if modes == 0 {
 		printUsage()
-		return fmt.Errorf("specify --pair, --unpair, --remove, --list-peers, --add-interface, --remove-interface, or --reconcile")
+		return fmt.Errorf("specify --pair, --unpair, --remove, --list-peers, or --reconcile")
 	}
 	if modes > 1 {
 		return fmt.Errorf("use only one primary mode")
@@ -80,80 +69,53 @@ func run() error {
 	if *remove && *peerPublicKey == "" {
 		return fmt.Errorf("--remove requires --peer-public-key <key>")
 	}
-
-	if *addIface != "" {
-		return runAddInterface(*addIface)
+	if *remove && *iface == "" {
+		return fmt.Errorf("--remove requires --interface <iface>")
 	}
-	if *removeIface != "" {
-		return runRemoveInterface(*removeIface)
-	}
-
-	if *iface == "" {
-		return fmt.Errorf("--interface <iface> is required")
-	}
-	if err := runtime.ValidateInterfaceName(*iface); err != nil {
-		return err
-	}
-
-	site, err := settings.Load(*iface)
-	if err != nil {
-		return enrichIfaceError(*iface, err)
-	}
-	if site.DB == "" {
-		site.DB = runtime.DefaultStorePath(site.Interface)
-	}
-	if _, err := os.Stat(site.DB); err != nil {
-		if os.IsNotExist(err) {
-			return enrichIfaceError(*iface, fmt.Errorf("interface %s not added (database %s missing; run: sudo moorlan --add-interface %s)", site.Interface, site.DB, site.Interface))
+	if *iface != "" {
+		if err := runtime.ValidateInterfaceName(*iface); err != nil {
+			return err
 		}
-		return err
 	}
 
-	release, err := runtime.LockInterface(site.Interface)
+	site, err := settings.Load()
+	if err != nil {
+		return err
+	}
+	storePath := runtime.StorePath(site.DB)
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	if *listPeers {
+		return printPeers(ctx, storePath, *iface)
+	}
+	if *reconcile {
+		return runReconcile(ctx, site, storePath, *iface)
+	}
+	if *remove {
+		return runRemove(ctx, storePath, *iface, *peerPublicKey)
+	}
+
+	name, err := resolveSessionInterface(site, storePath, *iface, *unpair)
+	if err != nil {
+		return err
+	}
+	release, err := runtime.LockInterface(name)
 	if err != nil {
 		return err
 	}
 	defer release()
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	if *reconcile || *remove || *listPeers {
-		host, err := runtime.DiscoverDevice(site.Interface, site.DB)
-		if err != nil {
-			return err
-		}
-		assigner, err := runtime.OpenAssigner(ctx, host)
-		if err != nil {
-			return err
-		}
-		defer assigner.Close()
-		if *listPeers {
-			return printPeers(ctx, assigner)
-		}
-		if *reconcile {
-			if err := assigner.Reconcile(ctx); err != nil {
-				return err
-			}
-			fmt.Printf("reconciled %s from %s\n", host.Snap.Name, host.StorePath)
-			return nil
-		}
-		removed, err := assigner.RemoveManaged(ctx, *peerPublicKey)
-		if err != nil {
-			return err
-		}
-		fmt.Printf("removed peer %s\n", removed)
-		return nil
-	}
-
-	if err := requirePairSettings(&site, *unpair); err != nil {
-		return err
-	}
 
 	var host runtime.Host
 	if *unpair {
-		host, err = runtime.DiscoverUnpair(site.Interface, site.DB, site.PrivateEndpoint)
+		host, err = runtime.DiscoverUnpair(name, storePath, site.PrivateEndpoint)
 	} else {
-		host, err = runtime.Discover(site.Interface, site.DB, site.PrivateEndpoint, site.HomeNetworks, site.PublicEndpoint, site.DNSServers, site.DNSSearch)
+		cfg, ok := site.Lookup(name)
+		if !ok {
+			return fmt.Errorf("interface %s is not listed in %s", name, settings.Path)
+		}
+		host, err = runtime.Discover(name, storePath, site.PrivateEndpoint, cfg.HomeNetworks, cfg.PublicEndpoint, cfg.DNSServers, cfg.DNSSearch)
 	}
 	if err != nil {
 		return err
@@ -242,262 +204,142 @@ func run() error {
 	}
 }
 
-func enrichIfaceError(want string, err error) error {
-	names, listErr := settings.ListIfaceNames()
-	if listErr != nil || len(names) == 0 {
-		return err
-	}
-	var others []string
-	for _, name := range names {
-		if name != want {
-			others = append(others, name)
+func resolveSessionInterface(site settings.Site, storePath, ifaceFlag string, unpairOnly bool) (string, error) {
+	yamlNames := site.InterfaceNames()
+	if ifaceFlag != "" {
+		if _, ok := site.Lookup(ifaceFlag); ok {
+			return ifaceFlag, nil
 		}
+		if !unpairOnly {
+			return "", fmt.Errorf("interface %s is not listed in %s", ifaceFlag, settings.Path)
+		}
+		dbNames, err := runtime.ListDBInterfaces(storePath)
+		if err != nil {
+			return "", err
+		}
+		for _, name := range dbNames {
+			if name == ifaceFlag {
+				return ifaceFlag, nil
+			}
+		}
+		return "", fmt.Errorf("interface %s is not in %s or the peer database", ifaceFlag, settings.Path)
 	}
-	if len(others) == 0 {
-		return fmt.Errorf("%w (configured: %s)", err, strings.Join(names, ", "))
+	if len(yamlNames) == 1 {
+		return yamlNames[0], nil
 	}
-	return fmt.Errorf("%w (other configured interfaces: %s)", err, strings.Join(others, ", "))
+	if len(yamlNames) == 0 {
+		if unpairOnly {
+			return "", fmt.Errorf("--interface is required when no interfaces are listed in %s", settings.Path)
+		}
+		return "", fmt.Errorf("no interfaces listed in %s", settings.Path)
+	}
+	return "", fmt.Errorf("--interface is required when multiple interfaces are configured (%s)", strings.Join(yamlNames, ", "))
 }
 
-func printUsage() {
-	fmt.Fprint(os.Stderr, `Usage:
-  moorlan --add-interface <iface>     # validate /etc/moorlan/<iface>.conf; create DB + reconcile unit
-  moorlan --remove-interface <iface>  # unit + conf + empty DB (refuses if peers remain)
-  moorlan --pair --interface <iface>
-  moorlan --unpair --interface <iface>
-  moorlan --list-peers --interface <iface>
-  moorlan --remove --interface <iface> --peer-public-key <key>
-  moorlan --reconcile --interface <iface>
-
-Install the release binary to /usr/local/bin/moorlan and the example conf to
-/usr/share/moorlan/moorlan.conf.example (see server/README.md).
-Site conf /etc/moorlan/<iface>.conf is NOT your wg-quick/networkd device file.
-Peers live in SQLite. Site settings come from the conf file only.
-`)
-}
-
-func printPeers(ctx context.Context, assigner *runtime.Assigner) error {
-	peers, err := assigner.List(ctx)
+func runReconcile(ctx context.Context, site settings.Site, storePath, ifaceFlag string) error {
+	dbNames, err := runtime.ListDBInterfaces(storePath)
 	if err != nil {
 		return err
 	}
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "LABEL\tPUBLIC_KEY\tADDRESS")
-	for _, p := range peers {
-		label := p.Label
-		if label == "" {
-			label = "-"
-		}
-		addr := "-"
-		if len(p.AllowedIPs) > 0 {
-			addr = p.AllowedIPs[0]
-		}
-		fmt.Fprintf(w, "%s\t%s\t%s\n", label, p.PublicKey, addr)
+	targets, err := runtime.ReconcileTargets(site.InterfaceNames(), dbNames, ifaceFlag)
+	if err != nil {
+		return err
 	}
-	return w.Flush()
-}
-
-func requirePairSettings(site *settings.Site, unpairOnly bool) error {
-	if site.PrivateEndpoint == "" {
-		return fmt.Errorf("private-endpoint missing in %s", settings.Path(site.Interface))
-	}
-	if unpairOnly {
+	if len(targets) == 0 {
+		fmt.Printf("nothing to reconcile (no interfaces in %s or %s)\n", settings.Path, storePath)
 		return nil
 	}
-	if site.HomeNetworks == "" {
-		return fmt.Errorf("home-networks missing in %s", settings.Path(site.Interface))
+	var failed int
+	for _, name := range targets {
+		if err := reconcileOne(ctx, storePath, name); err != nil {
+			failed++
+			fmt.Fprintf(os.Stderr, "moorlan: reconcile %s: %v\n", name, err)
+			continue
+		}
+		fmt.Printf("reconciled %s from %s\n", name, storePath)
 	}
-	if site.PublicEndpoint == "" {
-		return fmt.Errorf("public-endpoint missing in %s (DDNS or static host:port)", settings.Path(site.Interface))
-	}
-	if _, _, err := payload.SplitEndpoint(site.PublicEndpoint); err != nil {
-		return fmt.Errorf("public-endpoint in %s: %w", settings.Path(site.Interface), err)
-	}
-	if site.DNSServers == "" {
-		return fmt.Errorf("dns-servers missing in %s", settings.Path(site.Interface))
+	if failed == len(targets) {
+		return fmt.Errorf("reconcile failed for every interface (%d)", failed)
 	}
 	return nil
 }
 
-func runAddInterface(iface string) error {
-	if err := runtime.ValidateInterfaceName(iface); err != nil {
+func reconcileOne(ctx context.Context, storePath, name string) error {
+	if err := runtime.ValidateInterfaceName(name); err != nil {
 		return err
 	}
-	release, err := runtime.LockInterface(iface)
+	release, err := runtime.LockInterface(name)
 	if err != nil {
 		return err
 	}
-
-	site, err := settings.Load(iface)
+	defer release()
+	host, err := runtime.DiscoverDevice(name, storePath)
 	if err != nil {
-		release()
 		return err
 	}
-	storePath := site.DB
-	if storePath == "" {
-		storePath = runtime.DefaultStorePath(iface)
-		site.DB = storePath
-	}
-	unitPath := systemd.UnitPath(iface)
-
-	if _, err := os.Stat(storePath); err == nil {
-		release()
-		return fmt.Errorf("database %s already exists; remove peers then: sudo moorlan --remove-interface %s", storePath, iface)
-	} else if !os.IsNotExist(err) {
-		release()
-		return err
-	}
-	if _, err := os.Stat(unitPath); err == nil {
-		release()
-		return fmt.Errorf("reconcile unit %s already exists; redo with: sudo moorlan --remove-interface %s", unitPath, iface)
-	} else if !os.IsNotExist(err) {
-		release()
-		return err
-	}
-
-	if site.PrivateEndpoint == "" || site.HomeNetworks == "" || site.PublicEndpoint == "" || site.DNSServers == "" {
-		release()
-		return fmt.Errorf("site conf %s must set private-endpoint, home-networks, public-endpoint, and dns-servers (see %s)", settings.Path(iface), settings.ExamplePath)
-	}
-	if _, _, err := payload.SplitEndpoint(site.PublicEndpoint); err != nil {
-		release()
-		return fmt.Errorf("public-endpoint: %w", err)
-	}
-
-	host, err := runtime.Discover(iface, storePath, site.PrivateEndpoint, site.HomeNetworks, site.PublicEndpoint, site.DNSServers, site.DNSSearch)
+	assigner, err := runtime.OpenAssigner(ctx, host)
 	if err != nil {
-		release()
-		return fmt.Errorf("cannot add interface: %w", err)
-	}
-
-	// Partial failure rolls back DB and unit only — never the operator site conf.
-	rollback := func() {
-		_ = os.Remove(unitPath)
-		_ = os.Remove(storePath)
-	}
-
-	ctx := context.Background()
-	if err := runtime.InitDatabase(ctx, host); err != nil {
-		rollback()
-		release()
 		return err
 	}
-	fmt.Printf("initialized %s\n", storePath)
-	fmt.Printf("using site conf %s (unchanged)\n", settings.Path(iface))
-
-	// Write the unit while locked, but release before enable --now so reconcile can take the lock.
-	if err := installUnit(iface); err != nil {
-		rollback()
-		release()
-		return err
-	}
-	release()
-
-	unitName := filepath.Base(unitPath)
-	if err := systemctl("enable", "--now", unitName); err != nil {
-		_ = systemctl("disable", "--now", unitName)
-		rollback()
-		_ = systemctl("daemon-reload")
-		return err
-	}
-	fmt.Printf("enabled %s\n", unitName)
-	fmt.Printf("next: sudo moorlan --pair --interface %s\n", iface)
-	return nil
+	defer assigner.Close()
+	return assigner.Reconcile(ctx)
 }
 
-func runRemoveInterface(iface string) error {
-	if err := runtime.ValidateInterfaceName(iface); err != nil {
-		return err
-	}
+func runRemove(ctx context.Context, storePath, iface, peerPublicKey string) error {
 	release, err := runtime.LockInterface(iface)
 	if err != nil {
 		return err
 	}
 	defer release()
-
-	storePath := runtime.DefaultStorePath(iface)
-	if settings.Exists(iface) {
-		site, err := settings.Load(iface)
-		if err != nil {
-			return err
-		}
-		if site.DB != "" {
-			storePath = site.DB
-		}
-	}
-	if _, err := os.Stat(storePath); err == nil {
-		peers, err := runtime.CountPeers(storePath)
-		if err != nil {
-			return err
-		}
-		if peers > 0 {
-			return fmt.Errorf("refusing --remove-interface: database still has %d peer(s); unpair or --remove first", peers)
-		}
-	} else if !os.IsNotExist(err) {
-		return err
-	}
-
-	unitPath := systemd.UnitPath(iface)
-	if _, err := os.Stat(unitPath); err == nil {
-		if err := systemctl("disable", "--now", filepath.Base(unitPath)); err != nil {
-			return err
-		}
-		if err := os.Remove(unitPath); err != nil {
-			return err
-		}
-	} else if !os.IsNotExist(err) {
-		return err
-	}
-	if err := systemctl("daemon-reload"); err != nil {
-		return err
-	}
-	fmt.Printf("removed unit %s\n", unitPath)
-
-	if err := os.Remove(storePath); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	if err := os.Remove(settings.Path(iface)); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	fmt.Printf("removed %s\nremoved %s\n", storePath, settings.Path(iface))
-	fmt.Printf("interface %s removed from Moorlan; host WireGuard device unchanged\n", iface)
-	return nil
-}
-
-func systemctl(args ...string) error {
-	cmd := exec.Command("systemctl", args...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		msg := strings.TrimSpace(string(out))
-		if msg == "" {
-			return fmt.Errorf("systemctl %s: %w (see journalctl -u %s)", strings.Join(args, " "), err, lastUnitArg(args))
-		}
-		return fmt.Errorf("systemctl %s: %w\n%s", strings.Join(args, " "), err, msg)
-	}
-	return nil
-}
-
-func lastUnitArg(args []string) string {
-	for i := len(args) - 1; i >= 0; i-- {
-		if strings.HasSuffix(args[i], ".service") {
-			return args[i]
-		}
-	}
-	if len(args) > 0 {
-		return args[len(args)-1]
-	}
-	return "moorlan-reconcile-*.service"
-}
-
-func installUnit(iface string) error {
-	text, err := systemd.Render(iface)
+	host, err := runtime.DiscoverDevice(iface, storePath)
 	if err != nil {
 		return err
 	}
-	path := systemd.UnitPath(iface)
-	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+	assigner, err := runtime.OpenAssigner(ctx, host)
+	if err != nil {
 		return err
 	}
-	fmt.Printf("wrote %s\n", path)
-	return systemctl("daemon-reload")
+	defer assigner.Close()
+	removed, err := assigner.RemoveManaged(ctx, peerPublicKey)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("removed peer %s\n", removed)
+	return nil
+}
+
+func printUsage() {
+	fmt.Fprint(os.Stderr, `Usage:
+  moorlan --pair [--interface <iface>]
+  moorlan --unpair [--interface <iface>]
+  moorlan --list-peers [--interface <iface>]
+  moorlan --remove --interface <iface> --peer-public-key <key>
+  moorlan --reconcile [--interface <iface>]
+
+Install the release binary to /usr/local/bin/moorlan and the example YAML to
+/usr/share/moorlan/moorlan.yaml.example (see server/README.md).
+Site conf /etc/moorlan/moorlan.yaml is NOT your wg-quick/networkd device file.
+Peers live in SQLite. Site settings come from the YAML file only.
+`)
+}
+
+func printPeers(ctx context.Context, storePath, ifaceFilter string) error {
+	peers, err := runtime.ListPeers(ctx, storePath, ifaceFilter)
+	if err != nil {
+		return err
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "INTERFACE\tLABEL\tPUBLIC_KEY\tADDRESS")
+	for _, p := range peers {
+		label := p.Label
+		if label == "" {
+			label = "-"
+		}
+		addr := p.Address
+		if addr == "" {
+			addr = "-"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", p.Interface, label, p.PublicKey, addr)
+	}
+	return w.Flush()
 }

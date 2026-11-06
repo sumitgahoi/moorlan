@@ -27,7 +27,7 @@ type Host struct {
 }
 
 // Discover opens an existing WireGuard device for pairing (needs pool + listen port).
-func Discover(wgName, storePath, privateEndpoint, homeNetworks, publicEndpoint, dnsServers, dnsSearch string) (Host, error) {
+func Discover(wgName, storePath, privateEndpoint string, homeNetworks []string, publicEndpoint string, dnsServers, dnsSearch []string) (Host, error) {
 	host, err := discover(wgName, storePath, privateEndpoint, homeNetworks, publicEndpoint, true)
 	if err != nil {
 		return Host{}, err
@@ -67,10 +67,10 @@ func DiscoverUnpair(wgName, storePath, privateEndpoint string) (Host, error) {
 
 // DiscoverDevice opens the device for reconcile or --remove (no LAN control address).
 func DiscoverDevice(wgName, storePath string) (Host, error) {
-	return discover(wgName, storePath, "", "", "", false)
+	return discover(wgName, storePath, "", nil, "", false)
 }
 
-func discover(wgName, storePath, privateEndpoint, homeNetworks, publicEndpoint string, pairing bool) (Host, error) {
+func discover(wgName, storePath, privateEndpoint string, homeNetworks []string, publicEndpoint string, pairing bool) (Host, error) {
 	if runtime.GOOS != "linux" {
 		return Host{}, fmt.Errorf("Moorlan server requires Linux")
 	}
@@ -94,7 +94,7 @@ func discover(wgName, storePath, privateEndpoint, homeNetworks, publicEndpoint s
 		return Host{}, err
 	}
 	if storePath == "" {
-		storePath = DefaultStorePath(wgName)
+		storePath = DefaultStorePath
 	}
 	host := Host{
 		Snap: iface.Snapshot{
@@ -107,7 +107,7 @@ func discover(wgName, storePath, privateEndpoint, homeNetworks, publicEndpoint s
 		StorePath: storePath,
 		Endpoint:  publicEndpoint,
 	}
-	if privateEndpoint == "" && homeNetworks == "" {
+	if privateEndpoint == "" && len(homeNetworks) == 0 {
 		if publicEndpoint != "" {
 			if _, _, err := payload.SplitEndpoint(publicEndpoint); err != nil {
 				return Host{}, err
@@ -209,14 +209,13 @@ func ipv4PrefixFullyPrivate(network *net.IPNet) bool {
 	return false
 }
 
-func parseHomeNetworks(text string) ([]string, error) {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return nil, fmt.Errorf("home-networks required (for example home-networks=10.10.0.0/24,10.10.10.0/24)")
+func parseHomeNetworks(parts []string) ([]string, error) {
+	if len(parts) == 0 {
+		return nil, fmt.Errorf("home-networks required (for example home-networks: [10.10.0.0/24, 10.10.10.0/24])")
 	}
 	var out []string
 	seen := map[string]bool{}
-	for _, part := range strings.Split(text, ",") {
+	for _, part := range parts {
 		part = strings.TrimSpace(part)
 		if part == "" {
 			continue
@@ -240,7 +239,7 @@ func parseHomeNetworks(text string) ([]string, error) {
 		out = append(out, cidr)
 	}
 	if len(out) == 0 {
-		return nil, fmt.Errorf("home-networks required (for example home-networks=10.10.0.0/24,10.10.10.0/24)")
+		return nil, fmt.Errorf("home-networks required (for example home-networks: [10.10.0.0/24, 10.10.10.0/24])")
 	}
 	return out, nil
 }
@@ -248,7 +247,7 @@ func parseHomeNetworks(text string) ([]string, error) {
 func resolvePrivateEndpoint(wgName, endpoint string, homeNetworks []string) (string, int, error) {
 	endpoint = strings.TrimSpace(endpoint)
 	if endpoint == "" {
-		return "", 0, fmt.Errorf("private-endpoint required (for example private-endpoint=10.10.10.1:8756)")
+		return "", 0, fmt.Errorf("private-endpoint required (for example private-endpoint: 10.10.10.1:8756)")
 	}
 	host, portText, err := payload.SplitEndpoint(endpoint)
 	if err != nil {
@@ -315,14 +314,13 @@ func validateHomeNetworks(homeNetworks []string, tunnel *net.IPNet) error {
 }
 
 // parseDNSServers requires one or more unicast IPv4 resolvers (private or public).
-func parseDNSServers(text string) ([]string, error) {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return nil, fmt.Errorf("dns-servers required (unicast IPv4 resolvers, e.g. dns-servers=10.10.10.53 or 1.1.1.1)")
+func parseDNSServers(parts []string) ([]string, error) {
+	if len(parts) == 0 {
+		return nil, fmt.Errorf("dns-servers required (unicast IPv4 resolvers, e.g. [10.10.10.53] or [1.1.1.1])")
 	}
 	var out []string
 	seen := map[string]bool{}
-	for _, part := range strings.Split(text, ",") {
+	for _, part := range parts {
 		part = strings.TrimSpace(part)
 		if part == "" {
 			continue
@@ -335,7 +333,6 @@ func parseDNSServers(text string) ([]string, error) {
 		if ip.IsUnspecified() || ip.IsMulticast() || ip.IsLoopback() || ip[0] == 255 {
 			return nil, fmt.Errorf("unsupported dns-servers %s: use a unicast IPv4 address", ip)
 		}
-		// Reject limited broadcast and class-E / experimental as non-unicast for resolvers.
 		if ip.Equal(net.IPv4bcast) {
 			return nil, fmt.Errorf("unsupported dns-servers %s: use a unicast IPv4 address", ip)
 		}
@@ -347,21 +344,20 @@ func parseDNSServers(text string) ([]string, error) {
 		out = append(out, addr)
 	}
 	if len(out) == 0 {
-		return nil, fmt.Errorf("dns-servers required (unicast IPv4 resolvers, e.g. dns-servers=10.10.10.53 or 1.1.1.1)")
+		return nil, fmt.Errorf("dns-servers required (unicast IPv4 resolvers, e.g. [10.10.10.53] or [1.1.1.1])")
 	}
 	return out, nil
 }
 
 // parseDNSSearch parses optional search domains (e.g. home.arpa) so short names
 // like "carbon" expand the same way they do on the LAN.
-func parseDNSSearch(text string) ([]string, error) {
-	text = strings.TrimSpace(text)
-	if text == "" {
+func parseDNSSearch(parts []string) ([]string, error) {
+	if len(parts) == 0 {
 		return nil, nil
 	}
 	var out []string
 	seen := map[string]bool{}
-	for _, part := range strings.Split(text, ",") {
+	for _, part := range parts {
 		part = strings.ToLower(strings.TrimSpace(part))
 		part = strings.TrimSuffix(part, ".")
 		if part == "" {

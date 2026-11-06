@@ -51,13 +51,13 @@ func (f *fakeWG) ConfigureDevice(_ string, c wgtypes.Config) error {
 
 func fixture(t *testing.T) (*Assigner, *fakeWG, wgtypes.Key) {
 	t.Helper()
-	dbPath := filepath.Join(t.TempDir(), "moorlan0.db")
+	dbPath := filepath.Join(t.TempDir(), "moorlan.db")
 	fake := &fakeWG{device: &wgtypes.Device{Name: "moorlan0", PrivateKey: wgtypes.Key{3}, PublicKey: wgtypes.Key{2}, ListenPort: 51823}}
-	if err := initStore(dbPath, fake.device.PublicKey.String(), 0); err != nil {
+	store, err := openStore(dbPath)
+	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := openStore(dbPath, fake.device.PublicKey.String())
-	if err != nil {
+	if err := store.bindInterface(context.Background(), "moorlan0", fake.device.PublicKey.String()); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { store.db.Close() })
@@ -110,7 +110,7 @@ func TestAssignPersistsAndRetriesWithoutChangingLivePeer(t *testing.T) {
 	if len(client.changes) != 1 || client.changes[0].ReplacePeers {
 		t.Fatal("retry changed existing sessions")
 	}
-	rows, _ := a.store.list(context.Background())
+	rows, _ := a.store.list(context.Background(), "moorlan0")
 	if len(rows) != 1 || rows[0].Label != "phone" {
 		t.Fatal(rows)
 	}
@@ -179,7 +179,7 @@ func TestApplyFailureKeepsStableAssignment(t *testing.T) {
 	if _, err := a.Assign(context.Background(), peerPub(key), "phone"); err == nil {
 		t.Fatal("expected failure")
 	}
-	rows, err := a.store.list(context.Background())
+	rows, err := a.store.list(context.Background(), "moorlan0")
 	if err != nil || len(rows) != 1 || rows[0].AllowedIPs[0] != "10.8.0.2/32" {
 		t.Fatalf("lost reservation: %v %v", rows, err)
 	}
@@ -193,7 +193,7 @@ func TestApplyFailureKeepsStableAssignment(t *testing.T) {
 func TestReconcileRejectsCorruptPeerRows(t *testing.T) {
 	a, _, _ := fixture(t)
 	ctx := context.Background()
-	if err := a.store.insert(ctx, "not-a-key", "10.8.0.2/32", "bad"); err != nil {
+	if err := a.store.insert(ctx, "moorlan0", "not-a-key", "10.8.0.2/32", "bad"); err != nil {
 		t.Fatal(err)
 	}
 	if err := a.Reconcile(ctx); err == nil {
@@ -203,7 +203,7 @@ func TestReconcileRejectsCorruptPeerRows(t *testing.T) {
 	if _, err := a.store.db.ExecContext(ctx, "DELETE FROM peers"); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.store.insert(ctx, key, "not-a-cidr", "bad"); err != nil {
+	if err := a.store.insert(ctx, "moorlan0", key, "not-a-cidr", "bad"); err != nil {
 		t.Fatal(err)
 	}
 	if err := a.Reconcile(ctx); err == nil {
@@ -285,7 +285,7 @@ func TestConcurrentAssignmentsAndDatabaseUniqueness(t *testing.T) {
 	if first == second {
 		t.Fatal("duplicate address")
 	}
-	if err := a.store.insert(context.Background(), wgtypes.Key{5}.String(), first, "other"); err == nil {
+	if err := a.store.insert(context.Background(), "moorlan0", wgtypes.Key{5}.String(), first, "other"); err == nil {
 		t.Fatal("database accepted duplicate address")
 	}
 }
@@ -326,7 +326,7 @@ func TestAllocationReservesLiveAndUnfinishedAssignments(t *testing.T) {
 	live, unfinished := wgtypes.Key{7}, wgtypes.Key{8}
 	_, network, _ := net.ParseCIDR("10.8.0.3/32")
 	client.device.Peers = []wgtypes.Peer{{PublicKey: live, AllowedIPs: []net.IPNet{*network}}}
-	if err := a.store.insert(context.Background(), unfinished.String(), "10.8.0.4/32", "pending"); err != nil {
+	if err := a.store.insert(context.Background(), "moorlan0", unfinished.String(), "10.8.0.4/32", "pending"); err != nil {
 		t.Fatal(err)
 	}
 	lease, err := a.Assign(context.Background(), peerPub(key), "phone")

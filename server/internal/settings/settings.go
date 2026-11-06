@@ -1,122 +1,127 @@
-// Package settings loads per-interface site settings under /etc/moorlan.
+// Package settings loads host site settings from /etc/moorlan/moorlan.yaml.
 // The file holds only static host parameters (not peers or device keys).
 package settings
 
 import (
-	"bufio"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
-// Dir is the directory for per-interface site conf files. Tests may override it.
-var Dir = "/etc/moorlan"
+// Path is the canonical site conf path. Tests may override it.
+var Path = "/etc/moorlan/moorlan.yaml"
 
-// ExamplePath is where the packaged example conf is installed.
-const ExamplePath = "/usr/share/moorlan/moorlan.conf.example"
+// ExamplePath is where the packaged example YAML is installed.
+const ExamplePath = "/usr/share/moorlan/moorlan.yaml.example"
 
-// Site is the static configuration for one WireGuard interface.
+// Site is the static host configuration.
 type Site struct {
-	Interface       string
 	DB              string
 	PrivateEndpoint string
-	HomeNetworks    string
-	PublicEndpoint  string
-	DNSServers      string
-	DNSSearch       string
+	Interfaces      map[string]Interface
 }
 
-// Path returns /etc/moorlan/<iface>.conf.
-func Path(iface string) string {
-	return filepath.Join(Dir, iface+".conf")
+// Interface is static settings for one WireGuard interface.
+type Interface struct {
+	Name           string
+	PublicEndpoint string
+	HomeNetworks   []string
+	DNSServers     []string
+	DNSSearch      []string
 }
 
-// Exists reports whether a site conf file is present for iface.
-func Exists(iface string) bool {
-	_, err := os.Stat(Path(iface))
-	return err == nil
+type file struct {
+	DB              string                `yaml:"db"`
+	PrivateEndpoint string                `yaml:"private-endpoint"`
+	Interfaces      map[string]ifaceFile  `yaml:"interfaces"`
 }
 
-// ListIfaceNames returns iface names that have a conf under Dir.
-func ListIfaceNames() ([]string, error) {
-	entries, err := os.ReadDir(Dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	var names []string
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		name := e.Name()
-		if !strings.HasSuffix(name, ".conf") {
-			continue
-		}
-		names = append(names, strings.TrimSuffix(name, ".conf"))
-	}
-	sort.Strings(names)
-	return names, nil
+type ifaceFile struct {
+	PublicEndpoint string   `yaml:"public-endpoint"`
+	HomeNetworks   []string `yaml:"home-networks"`
+	DNSServers     []string `yaml:"dns-servers"`
+	DNSSearch      []string `yaml:"dns-search"`
 }
 
-// Load reads and validates a site conf. Missing file is an error that names
+// Load reads and validates the site YAML. Missing file is an error that names
 // the expected path and the shipped example to copy.
-func Load(iface string) (Site, error) {
-	path := Path(iface)
-	file, err := os.Open(path)
+func Load() (Site, error) {
+	raw, err := os.ReadFile(Path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return Site{}, fmt.Errorf("site conf %s not found; copy %s and edit it first", path, ExamplePath)
+			return Site{}, fmt.Errorf("site conf %s not found; copy %s and edit it first", Path, ExamplePath)
 		}
 		return Site{}, err
 	}
-	defer file.Close()
-	site := Site{Interface: iface}
-	scanner := bufio.NewScanner(file)
-	lineNo := 0
-	for scanner.Scan() {
-		lineNo++
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		key, value, ok := strings.Cut(line, "=")
-		if !ok {
-			return Site{}, fmt.Errorf("%s:%d: expected key=value", path, lineNo)
-		}
-		key = strings.TrimSpace(key)
-		value = strings.TrimSpace(value)
-		switch key {
-		case "interface":
-			site.Interface = value
-		case "db":
-			site.DB = value
-		case "private-endpoint":
-			site.PrivateEndpoint = value
-		case "home-networks":
-			site.HomeNetworks = value
-		case "public-endpoint":
-			site.PublicEndpoint = value
-		case "dns-servers":
-			site.DNSServers = value
-		case "dns-search":
-			site.DNSSearch = value
-		default:
-			return Site{}, fmt.Errorf("%s:%d: unknown key %q (allowed: interface, db, private-endpoint, public-endpoint, home-networks, dns-servers, dns-search)", path, lineNo, key)
-		}
+	var decoded file
+	dec := yaml.NewDecoder(strings.NewReader(string(raw)))
+	dec.KnownFields(true)
+	if err := dec.Decode(&decoded); err != nil {
+		return Site{}, fmt.Errorf("%s: %w", Path, err)
 	}
-	if err := scanner.Err(); err != nil {
-		return Site{}, err
+	site := Site{
+		DB:              strings.TrimSpace(decoded.DB),
+		PrivateEndpoint: strings.TrimSpace(decoded.PrivateEndpoint),
+		Interfaces:      map[string]Interface{},
 	}
-	if site.Interface == "" {
-		site.Interface = iface
+	if site.PrivateEndpoint == "" {
+		return Site{}, fmt.Errorf("%s: private-endpoint is required", Path)
 	}
-	if site.Interface != iface {
-		return Site{}, fmt.Errorf("%s: interface=%s does not match conf file for %s", path, site.Interface, iface)
+	for name, cfg := range decoded.Interfaces {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return Site{}, fmt.Errorf("%s: interfaces contains an empty name", Path)
+		}
+		iface := Interface{
+			Name:           name,
+			PublicEndpoint: strings.TrimSpace(cfg.PublicEndpoint),
+			HomeNetworks:   trimList(cfg.HomeNetworks),
+			DNSServers:     trimList(cfg.DNSServers),
+			DNSSearch:      trimList(cfg.DNSSearch),
+		}
+		if iface.PublicEndpoint == "" {
+			return Site{}, fmt.Errorf("%s: interfaces.%s.public-endpoint is required", Path, name)
+		}
+		if len(iface.HomeNetworks) == 0 {
+			return Site{}, fmt.Errorf("%s: interfaces.%s.home-networks is required", Path, name)
+		}
+		if len(iface.DNSServers) == 0 {
+			return Site{}, fmt.Errorf("%s: interfaces.%s.dns-servers is required", Path, name)
+		}
+		site.Interfaces[name] = iface
 	}
 	return site, nil
+}
+
+func trimList(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	var out []string
+	for _, s := range in {
+		s = strings.TrimSpace(s)
+		if s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// InterfaceNames returns configured interface names in stable order.
+func (s Site) InterfaceNames() []string {
+	names := make([]string, 0, len(s.Interfaces))
+	for name := range s.Interfaces {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// Lookup returns the YAML stanza for name, if present.
+func (s Site) Lookup(name string) (Interface, bool) {
+	iface, ok := s.Interfaces[name]
+	return iface, ok
 }

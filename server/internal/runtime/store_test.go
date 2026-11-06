@@ -10,64 +10,46 @@ import (
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
-func TestOpenStoreRequiresExplicitInitialization(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "missing", "moorlan0.db")
-	key := wgtypes.Key{2}.String()
-	if _, err := openStore(path, key); err == nil || !strings.Contains(err.Error(), "--add-interface") {
-		t.Fatalf("missing database error: %v", err)
-	}
-	if _, err := os.Stat(filepath.Dir(path)); !os.IsNotExist(err) {
-		t.Fatalf("open created the database directory: %v", err)
-	}
-	if err := initStore(path, key, 0); err != nil {
-		t.Fatal(err)
-	}
-	store, err := openStore(path, key)
+func TestOpenStoreCreatesHostDatabase(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "missing", "moorlan.db")
+	store, err := openStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store.db.Close()
-	if peers, err := store.list(context.Background()); err != nil || len(peers) != 0 {
-		t.Fatalf("initialized peers: %v %v", peers, err)
-	}
 	info, err := os.Stat(path)
 	if err != nil || info.Mode().Perm() != 0600 {
 		t.Fatalf("database permissions: %v %v", info, err)
 	}
-}
-
-func TestInitStoreDoesNotOverwriteOrAdoptExistingFiles(t *testing.T) {
-	for _, contents := range []string{"", "existing contents"} {
-		t.Run(contents, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "moorlan0.db")
-			if err := os.WriteFile(path, []byte(contents), 0600); err != nil {
-				t.Fatal(err)
-			}
-			if err := initStore(path, wgtypes.Key{2}.String(), 0); err == nil {
-				t.Fatal("initialized an existing file")
-			}
-			if _, err := openStore(path, wgtypes.Key{2}.String()); err == nil {
-				t.Fatal("opened an uninitialized database")
-			}
-			raw, err := os.ReadFile(path)
-			if err != nil || string(raw) != contents {
-				t.Fatalf("existing file changed: %q %v", raw, err)
-			}
-		})
+	if peers, err := store.list(context.Background(), "wg0"); err != nil || len(peers) != 0 {
+		t.Fatalf("initialized peers: %v %v", peers, err)
 	}
 }
 
-func TestInitStoreRefusesLivePeers(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "moorlan0.db")
-	err := initStore(path, wgtypes.Key{2}.String(), 1)
-	if err == nil {
-		t.Fatal("initialized while live peers exist")
+func TestBindInterfaceIsSticky(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "moorlan.db")
+	store, err := openStore(path)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(err.Error(), "remove them") || !strings.Contains(err.Error(), "pair through the app") {
-		t.Fatalf("live peer error: %v", err)
+	defer store.db.Close()
+	ctx := context.Background()
+	key := wgtypes.Key{2}.String()
+	if err := store.bindInterface(ctx, "wg0", key); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatalf("created database: %v", err)
+	if err := store.bindInterface(ctx, "wg0", key); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.bindInterface(ctx, "wg0", wgtypes.Key{9}.String()); err == nil {
+		t.Fatal("accepted a different server identity")
+	}
+	if err := store.bindInterface(ctx, "wg1", wgtypes.Key{3}.String()); err != nil {
+		t.Fatal(err)
+	}
+	names, err := store.interfaceNames(ctx)
+	if err != nil || len(names) != 2 || names[0] != "wg0" || names[1] != "wg1" {
+		t.Fatalf("%v %v", names, err)
 	}
 }
 
@@ -78,27 +60,27 @@ func TestInitializedStorePreservesIdentityAndAssignments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := initStore(a.Host.StorePath, client.device.PublicKey.String(), 0); err == nil {
-		t.Fatal("reinitialized existing database")
-	}
 	if err := a.store.db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := openStore(a.Host.StorePath, wgtypes.Key{9}.String()); err == nil {
-		t.Fatal("accepted a different server identity")
-	}
-	store, err := openStore(a.Host.StorePath, client.device.PublicKey.String())
+	store, err := openStore(a.Host.StorePath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store.db.Close()
-	peer, err := store.lookupPublicKey(ctx, peerPub(key))
+	if err := store.bindInterface(ctx, "moorlan0", wgtypes.Key{9}.String()); err == nil {
+		t.Fatal("accepted a different server identity")
+	}
+	if err := store.bindInterface(ctx, "moorlan0", client.device.PublicKey.String()); err != nil {
+		t.Fatal(err)
+	}
+	peer, err := store.lookupPublicKey(ctx, "moorlan0", peerPub(key))
 	if err != nil || peer.AllowedIPs[0] != lease.Address || peer.Label != "phone" {
 		t.Fatalf("assignment lost: %+v %v", peer, err)
 	}
 }
 
-func TestOpenAssignerDoesNotRecreateLostDatabaseOrTouchLivePeers(t *testing.T) {
+func TestOpenAssignerRecreatesMissingDatabase(t *testing.T) {
 	a, client, key := fixture(t)
 	if _, err := a.Assign(context.Background(), peerPub(key), "phone"); err != nil {
 		t.Fatal(err)
@@ -109,13 +91,62 @@ func TestOpenAssignerDoesNotRecreateLostDatabaseOrTouchLivePeers(t *testing.T) {
 	if err := os.Remove(a.Host.StorePath); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := OpenAssigner(context.Background(), a.Host); err == nil {
-		t.Fatal("recreated missing database")
+	// Host-wide DB is created on demand; live peers are untouched until reconcile.
+	opened, err := OpenAssigner(context.Background(), a.Host)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := os.Stat(a.Host.StorePath); !os.IsNotExist(err) {
-		t.Fatalf("database was recreated: %v", err)
+	defer opened.Close()
+	if _, err := os.Stat(a.Host.StorePath); err != nil {
+		t.Fatalf("database was not created: %v", err)
 	}
 	if len(client.device.Peers) != 1 || client.device.Peers[0].PublicKey != key.PublicKey() {
 		t.Fatal("live peer changed")
+	}
+	// Fresh DB has no peer rows for this iface yet — reconcile would clear live.
+	peers, err := opened.List(context.Background())
+	if err != nil || len(peers) != 0 {
+		t.Fatalf("expected empty recreated DB peers: %v %v", peers, err)
+	}
+}
+
+func TestReconcileTargetsUnionAndFilter(t *testing.T) {
+	got, err := ReconcileTargets([]string{"wg1", "wg0"}, []string{"wg0", "wg2"}, "")
+	if err != nil || strings.Join(got, ",") != "wg0,wg1,wg2" {
+		t.Fatalf("%v %v", got, err)
+	}
+	got, err = ReconcileTargets([]string{"wg0"}, []string{"wg2"}, "wg2")
+	if err != nil || len(got) != 1 || got[0] != "wg2" {
+		t.Fatalf("%v %v", got, err)
+	}
+	if _, err := ReconcileTargets([]string{"wg0"}, nil, "wg9"); err == nil {
+		t.Fatal("unknown filter accepted")
+	}
+}
+
+func TestSamePeerKeyAllowedOnTwoInterfaces(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "moorlan.db")
+	store, err := openStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.db.Close()
+	ctx := context.Background()
+	key := wgtypes.Key{5}.String()
+	if err := store.bindInterface(ctx, "wg0", wgtypes.Key{1}.String()); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.bindInterface(ctx, "wg1", wgtypes.Key{2}.String()); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.insert(ctx, "wg0", key, "10.8.0.2/32", "phone"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.insert(ctx, "wg1", key, "10.9.0.2/32", "phone"); err != nil {
+		t.Fatal(err)
+	}
+	all, err := store.listAll(ctx, "")
+	if err != nil || len(all) != 2 {
+		t.Fatalf("%v %v", all, err)
 	}
 }

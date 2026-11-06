@@ -52,7 +52,5 @@ func lockFile(path string) (func(), error) {
 	return func() { _ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN); _ = file.Close() }, nil
 }
 
-// DefaultStorePath is /var/lib/moorlan/<iface>.db.
-func DefaultStorePath(iface string) string {
-	return filepath.Join("/var/lib/moorlan", iface+".db")
-}
+// DefaultStorePath is the host-wide peer database.
+const DefaultStorePath = "/var/lib/moorlan/moorlan.db"

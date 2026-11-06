@@ -35,7 +35,7 @@ func TestUnpairDeletesRecordAndIsIdempotent(t *testing.T) {
 			t.Fatalf("attempt %d: %v", i, err)
 		}
 	}
-	rows, _ := a.store.list(context.Background())
+	rows, _ := a.store.list(context.Background(), "moorlan0")
 	if len(rows) != 0 || len(client.device.Peers) != 0 {
 		t.Fatal("removal incomplete")
 	}
@@ -59,7 +59,7 @@ func TestUnpairSucceedsWhenReconcileFailsAfterDBDelete(t *testing.T) {
 	if err := a.Remove(context.Background(), peerPub(key), lease.UnpairToken); err != nil {
 		t.Fatalf("DB-won remove must succeed even if reconcile fails: %v", err)
 	}
-	rows, _ := a.store.list(context.Background())
+	rows, _ := a.store.list(context.Background(), "moorlan0")
 	if len(rows) != 0 {
 		t.Fatal("DB should already have deleted the peer")
 	}
@@ -67,11 +67,14 @@ func TestUnpairSucceedsWhenReconcileFailsAfterDBDelete(t *testing.T) {
 		t.Fatal("live peer should remain until reconcile succeeds")
 	}
 	a.store.db.Close()
-	store, err := openStore(a.Host.StorePath, client.device.PublicKey.String())
+	store, err := openStore(a.Host.StorePath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store.db.Close()
+	if err := store.bindInterface(context.Background(), "moorlan0", client.device.PublicKey.String()); err != nil {
+		t.Fatal(err)
+	}
 	a.store = store
 	client.configureErr = nil
 	if err := a.Reconcile(context.Background()); err != nil {

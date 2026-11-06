@@ -26,50 +26,28 @@ type Assigner struct {
 	openClient func() (wireguardClient, error)
 }
 
-// OpenAssigner opens the peer database. It does not touch the live device;
-// call Reconcile or mutate via Assign/Remove to apply peers.
+// OpenAssigner opens the peer database and binds this interface's server key.
+// It does not touch the live device; call Reconcile or mutate via Assign/Remove.
 func OpenAssigner(ctx context.Context, host Host) (*Assigner, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	store, err := openStore(host.StorePath, host.Snap.PublicKey)
+	store, err := openStore(host.StorePath)
 	if err != nil {
+		return nil, err
+	}
+	if err := store.bindInterface(ctx, host.Snap.Name, host.Snap.PublicKey); err != nil {
+		store.db.Close()
 		return nil, err
 	}
 	return &Assigner{Host: host, store: store}, nil
 }
 
-// InitDatabase creates a database for an empty device without changing live peers.
-// The caller holds the interface lock, just as for all other command modes.
-func InitDatabase(ctx context.Context, host Host) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	live, err := countLivePeers(host.Snap.Name)
-	if err != nil {
-		return err
-	}
-	return initStore(host.StorePath, host.Snap.PublicKey, live)
-}
-
-func countLivePeers(name string) (int, error) {
-	client, err := wgctrl.New()
-	if err != nil {
-		return 0, err
-	}
-	defer client.Close()
-	device, err := client.Device(name)
-	if err != nil {
-		return 0, err
-	}
-	return len(device.Peers), nil
-}
-
 func (a *Assigner) Close() error { return a.store.db.Close() }
 
-// List returns enrolled peers from SQLite (label, public key, address).
+// List returns enrolled peers from SQLite for this interface.
 func (a *Assigner) List(ctx context.Context) ([]iface.Peer, error) {
-	return a.store.list(ctx)
+	return a.store.list(ctx, a.Host.Snap.Name)
 }
 
 func (a *Assigner) client() (wireguardClient, error) {
@@ -96,7 +74,7 @@ func (a *Assigner) reconcile(ctx context.Context, client wireguardClient) error 
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	peers, err := a.store.list(ctx)
+	peers, err := a.store.list(ctx, a.Host.Snap.Name)
 	if err != nil {
 		return err
 	}
@@ -204,7 +182,7 @@ func (a *Assigner) Assign(ctx context.Context, publicKey, label string) (pair.Le
 	if err != nil {
 		return pair.Lease{}, err
 	}
-	peers, err := a.store.list(ctx)
+	peers, err := a.store.list(ctx, a.Host.Snap.Name)
 	if err != nil {
 		return pair.Lease{}, err
 	}
@@ -228,6 +206,7 @@ func (a *Assigner) Assign(ctx context.Context, publicKey, label string) (pair.Le
 			address = p.AllowedIPs[0]
 		}
 	}
+	ifaceName := a.Host.Snap.Name
 	if address == "" {
 		reserved := append([]iface.Peer(nil), devicePeers(device)...)
 		reserved = append(reserved, peers...)
@@ -236,10 +215,10 @@ func (a *Assigner) Assign(ctx context.Context, publicKey, label string) (pair.Le
 			return pair.Lease{}, err
 		}
 		address = iface.AddressString(ip)
-		if err = a.store.insert(ctx, publicKey, address, label); err != nil {
+		if err = a.store.insert(ctx, ifaceName, publicKey, address, label); err != nil {
 			return pair.Lease{}, fmt.Errorf("reserve address: %w", err)
 		}
-	} else if err = a.store.setLabel(ctx, publicKey, label); err != nil {
+	} else if err = a.store.setLabel(ctx, ifaceName, publicKey, label); err != nil {
 		return pair.Lease{}, fmt.Errorf("update device label: %w", err)
 	}
 	if err = a.reconcile(ctx, client); err != nil {
