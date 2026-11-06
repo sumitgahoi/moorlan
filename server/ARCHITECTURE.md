@@ -130,17 +130,17 @@ interfaces (
   server_public_key TEXT NOT NULL UNIQUE
 );
 peers (
-  interface_id TEXT NOT NULL REFERENCES interfaces(name),
+  interface TEXT NOT NULL REFERENCES interfaces(name),
   public_key TEXT NOT NULL,
   address TEXT NOT NULL,
   label TEXT NOT NULL DEFAULT '',
-  PRIMARY KEY (interface_id, public_key),
-  UNIQUE (interface_id, address)
+  PRIMARY KEY (interface, public_key),
+  UNIQUE (interface, address)
 );
 ```
 
 No `metadata` table. No `pending_removals`. Labels may duplicate; peer identity is
-`(interface_id, public_key)`.
+`(interface, public_key)`.
 
 ## 6. Concurrency and failure
 

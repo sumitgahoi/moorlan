@@ -21,12 +21,12 @@ CREATE TABLE IF NOT EXISTS interfaces (
   server_public_key TEXT NOT NULL UNIQUE
 );
 CREATE TABLE IF NOT EXISTS peers (
-  interface_id TEXT NOT NULL REFERENCES interfaces(name),
+  interface TEXT NOT NULL REFERENCES interfaces(name),
   public_key TEXT NOT NULL,
   address TEXT NOT NULL,
   label TEXT NOT NULL DEFAULT '',
-  PRIMARY KEY (interface_id, public_key),
-  UNIQUE (interface_id, address)
+  PRIMARY KEY (interface, public_key),
+  UNIQUE (interface, address)
 );`
 
 // openStore opens or creates the host peer database.
@@ -76,6 +76,16 @@ func openStore(path string) (*peerStore, error) {
 	if _, err = db.Exec(`DROP TABLE IF EXISTS metadata`); err != nil {
 		return fail(err)
 	}
+	// Rename peers.interface_id → peers.interface on older databases.
+	var n int
+	if err = db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('peers') WHERE name='interface_id'`).Scan(&n); err != nil {
+		return fail(err)
+	}
+	if n > 0 {
+		if _, err = db.Exec(`ALTER TABLE peers RENAME COLUMN interface_id TO interface`); err != nil {
+			return fail(err)
+		}
+	}
 	return &peerStore{db: db}, nil
 }
 
@@ -115,7 +125,7 @@ func (s *peerStore) interfaceNames(ctx context.Context) ([]string, error) {
 }
 
 func (s *peerStore) list(ctx context.Context, ifaceName string) ([]iface.Peer, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT public_key,address,label FROM peers WHERE interface_id=? ORDER BY public_key`, ifaceName)
+	rows, err := s.db.QueryContext(ctx, `SELECT public_key,address,label FROM peers WHERE interface=? ORDER BY public_key`, ifaceName)
 	if err != nil {
 		return nil, err
 	}
@@ -145,9 +155,9 @@ func (s *peerStore) listAll(ctx context.Context, ifaceFilter string) ([]ListedPe
 		err  error
 	)
 	if ifaceFilter == "" {
-		rows, err = s.db.QueryContext(ctx, `SELECT interface_id,public_key,address,label FROM peers ORDER BY interface_id, public_key`)
+		rows, err = s.db.QueryContext(ctx, `SELECT interface,public_key,address,label FROM peers ORDER BY interface, public_key`)
 	} else {
-		rows, err = s.db.QueryContext(ctx, `SELECT interface_id,public_key,address,label FROM peers WHERE interface_id=? ORDER BY public_key`, ifaceFilter)
+		rows, err = s.db.QueryContext(ctx, `SELECT interface,public_key,address,label FROM peers WHERE interface=? ORDER BY public_key`, ifaceFilter)
 	}
 	if err != nil {
 		return nil, err
@@ -165,18 +175,18 @@ func (s *peerStore) listAll(ctx context.Context, ifaceFilter string) ([]ListedPe
 }
 
 func (s *peerStore) insert(ctx context.Context, ifaceName, key, address, label string) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO peers(interface_id,public_key,address,label) VALUES (?,?,?,?)`, ifaceName, key, address, label)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO peers(interface,public_key,address,label) VALUES (?,?,?,?)`, ifaceName, key, address, label)
 	return err
 }
 
 func (s *peerStore) setLabel(ctx context.Context, ifaceName, key, label string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE peers SET label=? WHERE interface_id=? AND public_key=?`, label, ifaceName, key)
+	_, err := s.db.ExecContext(ctx, `UPDATE peers SET label=? WHERE interface=? AND public_key=?`, label, ifaceName, key)
 	return err
 }
 
 func (s *peerStore) lookupPublicKey(ctx context.Context, ifaceName, key string) (iface.Peer, error) {
 	var address, label string
-	err := s.db.QueryRowContext(ctx, `SELECT address,label FROM peers WHERE interface_id=? AND public_key=?`, ifaceName, key).Scan(&address, &label)
+	err := s.db.QueryRowContext(ctx, `SELECT address,label FROM peers WHERE interface=? AND public_key=?`, ifaceName, key).Scan(&address, &label)
 	if err == sql.ErrNoRows {
 		return iface.Peer{}, fmt.Errorf("no managed peer with public key %q on %s", key, ifaceName)
 	}
@@ -188,7 +198,7 @@ func (s *peerStore) lookupPublicKey(ctx context.Context, ifaceName, key string) 
 
 // delete removes the peer row. It returns whether a row was deleted.
 func (s *peerStore) delete(ctx context.Context, ifaceName, key string) (bool, error) {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM peers WHERE interface_id=? AND public_key=?`, ifaceName, key)
+	res, err := s.db.ExecContext(ctx, `DELETE FROM peers WHERE interface=? AND public_key=?`, ifaceName, key)
 	if err != nil {
 		return false, err
 	}

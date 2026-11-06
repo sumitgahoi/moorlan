@@ -146,7 +146,7 @@ There is no `--add-interface` or `--remove-interface`.
 - Server allocates the next free `/32` in the tunnel subnet (deterministic scan
   of free host addresses). Re-pair of the same public key on the same interface
   keeps the existing address and refreshes the label. Duplicate labels are
-  allowed; peer identity is `(interface_id, public_key)`.
+  allowed; peer identity is `(interface, public_key)`.
 - Success response lease MUST include:
   - `public_key` — server WireGuard public key (MUST match QR)
   - `endpoint` — that interface’s `public-endpoint`
@@ -226,12 +226,12 @@ interfaces (
   server_public_key TEXT NOT NULL UNIQUE
 );
 peers (
-  interface_id TEXT NOT NULL REFERENCES interfaces(name),
+  interface TEXT NOT NULL REFERENCES interfaces(name),
   public_key TEXT NOT NULL,
   address TEXT NOT NULL,
   label TEXT NOT NULL DEFAULT '',
-  PRIMARY KEY (interface_id, public_key),
-  UNIQUE (interface_id, address)
+  PRIMARY KEY (interface, public_key),
+  UNIQUE (interface, address)
 );
 ```
 
