@@ -29,12 +29,6 @@ to a LAN address on this host, add an interface stanza, and fill
 Notes). On a configured interface, reconciliation removes live peers absent from
 Moorlan's database. Then pair phones under Day to day.
 
-If `moorlan-reconcile.service` failed because WireGuard was not up yet:
-
-```bash
-sudo systemctl reset-failed moorlan-reconcile.service && sudo systemctl start moorlan-reconcile.service
-```
-
 **Upgrade:** re-run the download step (keeps your YAML and DB).
 
 **Remove:** unpair in the app if you want phones cleared, then:

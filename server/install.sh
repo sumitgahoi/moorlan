@@ -38,7 +38,4 @@ systemctl daemon-reload
 systemctl enable --now moorlan-reconcile.service
 
 echo
-echo "Next: bring WireGuard up, edit /etc/moorlan/moorlan.yaml (private-endpoint + interface),"
-echo "then: sudo systemctl start moorlan-reconcile.service && sudo moorlan --pair"
-echo "If reconcile failed because WireGuard was not ready yet:"
-echo "  sudo systemctl reset-failed moorlan-reconcile.service && sudo systemctl start moorlan-reconcile.service"
+echo "Next: edit /etc/moorlan/moorlan.yaml, then: sudo moorlan --pair"
