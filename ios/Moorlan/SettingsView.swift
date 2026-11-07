@@ -5,152 +5,174 @@ import MoorlanCore
 struct SettingsView: View {
     @EnvironmentObject private var tunnel: TunnelManager
     @Environment(\.dismiss) private var dismiss
-    @State private var tipTitle = ""
-    @State private var tipMessage = ""
-    @State private var showTip = false
-    @State private var dnsOverrideText = ""
-    @State private var dnsErrorMessage = ""
-    @State private var showDNSError = false
+    @State private var showRoutingInfo = false
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    Picker(selection: cellularBinding) {
-                        ForEach(NetworkRouting.allCases, id: \.self) { option in
-                            Text(MoorlanCopy.routingTitle(option)).tag(option)
-                        }
-                    } label: {
-                        Text("Routing")
-                    }
-                    .disabled(tunnel.isUnpairing)
-                } header: {
-                    sectionHeader(MoorlanCopy.cellularSection, tip: MoorlanCopy.routingTip)
-                } footer: {
-                    Text(MoorlanCopy.settingsCellularFooter)
-                }
+                    cellularRow
 
-                Section {
                     if tunnel.currentNetworkID == nil {
-                        Text(pathSummary).foregroundStyle(.secondary)
-                        if case .wifi = tunnel.pathKind {
-                            Button(MoorlanCopy.allowWifiName) { tunnel.identifyWiFi() }
-                        }
+                        pathIdentityRow
                     }
 
                     ForEach(tunnel.knownNetworkIDs, id: \.self) { id in
                         networkRow(id)
                     }
                 } header: {
-                    sectionHeader(MoorlanCopy.wifiSection, tip: MoorlanCopy.routingTip)
-                } footer: {
-                    Text(MoorlanCopy.settingsNetworksFooter)
+                    routingPolicyHeader
                 }
-
-                Section {
-                    TextField(dnsPlaceholder, text: $dnsOverrideText)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .keyboardType(.numbersAndPunctuation)
-                        .disabled(tunnel.isUnpairing)
-                        .onSubmit { commitDNSOverride() }
-                } header: {
-                    Text(MoorlanCopy.dnsTempHeader)
-                } footer: {
-                    Text(MoorlanCopy.dnsTempFooter)
-                }
+                .listRowInsets(EdgeInsets(top: 16, leading: 16, bottom: 16, trailing: 16))
             }
             .navigationTitle(MoorlanCopy.settingsTitle)
             .navigationBarTitleDisplayMode(.inline)
             .interactiveDismissDisabled(tunnel.isUnpairing)
-            .onAppear { dnsOverrideText = dnsOverrideDisplay }
-            .alert(tipTitle, isPresented: $showTip) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text(tipMessage)
-            }
-            .alert(MoorlanCopy.dnsTempInvalidTitle, isPresented: $showDNSError) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text(dnsErrorMessage)
+            .sheet(isPresented: $showRoutingInfo) {
+                RoutingPolicyInfoSheet()
+                    .presentationDetents([.medium])
+                    .presentationDragIndicator(.visible)
             }
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") {
-                        if commitDNSOverride() { dismiss() }
-                    }
-                    .disabled(tunnel.isUnpairing)
+                    Button("Done") { dismiss() }
+                        .disabled(tunnel.isUnpairing)
                 }
+            }
+        }
+    }
+
+    private var routingPolicyHeader: some View {
+        HStack(spacing: 6) {
+            Text(MoorlanCopy.routingPolicySection)
+            Button {
+                showRoutingInfo = true
+            } label: {
+                Image(systemName: "info.circle")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(MoorlanCopy.routingPolicyInfoA11y)
+        }
+        .textCase(nil)
+    }
+
+    private var cellularRow: some View {
+        Menu {
+            routingMenuChoices(current: tunnel.policy.cellularRouting) { option in
+                tunnel.setPermanentCellularRouting(option)
+            }
+        } label: {
+            policyRowLabel(
+                title: MoorlanCopy.cellularSection,
+                systemImage: "antenna.radiowaves.left.and.right",
+                routing: tunnel.policy.cellularRouting
+            )
+        }
+        .disabled(tunnel.isUnpairing)
+        .accessibilityLabel(MoorlanCopy.cellularSection)
+        .accessibilityValue(MoorlanCopy.routingTitle(tunnel.policy.cellularRouting))
+    }
+
+    @ViewBuilder
+    private var pathIdentityRow: some View {
+        HStack(spacing: 12) {
+            Image(systemName: pathIdentityIcon)
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .frame(width: 22, alignment: .center)
+            Text(pathSummary)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+            if case .wifi = tunnel.pathKind {
+                Button(MoorlanCopy.allowWifiName) { tunnel.identifyWiFi() }
             }
         }
     }
 
     private func networkRow(_ id: String) -> some View {
         let routing = tunnel.permanentRouting(forNetworkID: id)
-        let isCurrent = id == tunnel.currentNetworkID
+        let isHome = routing == .off
         return Menu {
-            ForEach(NetworkRouting.allCases, id: \.self) { option in
-                Button {
-                    tunnel.setPermanentRouting(option, forNetworkID: id)
-                } label: {
-                    if option == routing {
-                        Label(MoorlanCopy.routingTitle(option), systemImage: "checkmark")
-                    } else {
-                        Text(MoorlanCopy.routingTitle(option))
-                    }
-                }
+            routingMenuChoices(current: routing) { option in
+                tunnel.setPermanentRouting(option, forNetworkID: id)
             }
         } label: {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Text(tunnel.displayNetworkName(id))
-                            .foregroundStyle(.primary)
-                        if isCurrent {
-                            Text(MoorlanCopy.hereNow)
-                                .font(.caption2.weight(.semibold))
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Color.secondary.opacity(0.2), in: Capsule())
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    Text(MoorlanCopy.routingSubtitle(routing))
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-            }
+            policyRowLabel(
+                title: tunnel.displayNetworkName(id),
+                systemImage: "wifi",
+                routing: routing,
+                isHome: isHome
+            )
         }
         .disabled(tunnel.isUnpairing)
-        .accessibilityLabel(tunnel.displayNetworkName(id))
+        .accessibilityLabel(
+            isHome
+                ? "\(tunnel.displayNetworkName(id)), \(MoorlanCopy.homeBadge)"
+                : tunnel.displayNetworkName(id)
+        )
         .accessibilityValue(MoorlanCopy.routingTitle(routing))
     }
 
-    private func sectionHeader(_ title: String, tip: String) -> some View {
-        HStack(spacing: 6) {
-            Text(title)
+    @ViewBuilder
+    private func routingMenuChoices(
+        current: NetworkRouting,
+        onSelect: @escaping (NetworkRouting) -> Void
+    ) -> some View {
+        ForEach(NetworkRouting.allCases, id: \.self) { option in
             Button {
-                tipTitle = title
-                tipMessage = tip
-                showTip = true
+                onSelect(option)
             } label: {
-                Image(systemName: "info.circle")
-                    .font(.footnote)
+                Label(
+                    MoorlanCopy.routingTitle(option),
+                    systemImage: option == current
+                        ? "checkmark.circle.fill"
+                        : MoorlanCopy.routingSymbol(option)
+                )
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("About \(title)")
         }
     }
 
-    private var cellularBinding: Binding<NetworkRouting> {
-        Binding(
-            get: { tunnel.policy.cellularRouting },
-            set: { tunnel.setPermanentCellularRouting($0) }
-        )
+    private func policyRowLabel(
+        title: String,
+        systemImage: String,
+        routing: NetworkRouting,
+        isHome: Bool = false
+    ) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .frame(width: 22, alignment: .center)
+
+            HStack(spacing: 8) {
+                Text(title)
+                    .foregroundStyle(.primary)
+                if isHome {
+                    Image(systemName: "house.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color(red: 0.92, green: 0.48, blue: 0.18))
+                        .accessibilityHidden(true)
+                }
+            }
+
+            Spacer(minLength: 8)
+
+            Text(MoorlanCopy.routingTitle(routing))
+                .foregroundStyle(.secondary)
+            Image(systemName: "chevron.up.chevron.down")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.tertiary)
+        }
+    }
+
+    private var pathIdentityIcon: String {
+        switch tunnel.pathKind {
+        case .cellular: return "antenna.radiowaves.left.and.right"
+        case .wifi: return "wifi"
+        case .other: return "questionmark.circle"
+        }
     }
 
     private var pathSummary: String {
@@ -160,32 +182,44 @@ struct SettingsView: View {
         case .other: return MoorlanCopy.noWifiYet
         }
     }
+}
 
-    private var dnsOverrideDisplay: String {
-        (tunnel.policy.dnsOverride ?? []).joined(separator: ", ")
-    }
+/// Sparse explainer for Off / Split / Full Tunnel.
+private struct RoutingPolicyInfoSheet: View {
+    @Environment(\.dismiss) private var dismiss
 
-    private var dnsPlaceholder: String {
-        let lease = tunnel.selectedServer?.lease.dnsServers
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty } ?? []
-        if lease.isEmpty { return MoorlanCopy.dnsTempPlaceholder }
-        return lease.joined(separator: ", ")
-    }
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(NetworkRouting.allCases, id: \.self) { option in
+                    HStack(alignment: .top, spacing: 14) {
+                        Image(systemName: MoorlanCopy.routingSymbol(option))
+                            .font(.title3)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 28, alignment: .center)
+                            .padding(.top, 2)
 
-    @discardableResult
-    private func commitDNSOverride() -> Bool {
-        let parsed = TunnelPolicy.parseDNSOverride(dnsOverrideText)
-        if let error = parsed.error {
-            dnsErrorMessage = error
-            showDNSError = true
-            return false
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(MoorlanCopy.routingInfoTitle(option))
+                                .font(.body.weight(.semibold))
+                            Text(MoorlanCopy.routingInfoBody(option))
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .padding(.vertical, 10)
+                    .listRowInsets(EdgeInsets(top: 12, leading: 20, bottom: 12, trailing: 20))
+                }
+            }
+            .listStyle(.plain)
+            .navigationTitle(MoorlanCopy.routingPolicySection)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
         }
-        let next = parsed.servers
-        if next != tunnel.policy.dnsOverride {
-            tunnel.policy.dnsOverride = next
-            tunnel.savePolicyAndRestartTunnel()
-        }
-        return true
     }
 }
