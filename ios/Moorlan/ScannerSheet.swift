@@ -15,7 +15,6 @@ struct ScannerSheet: View {
     @State private var facingError: UserFacingError?
     @State private var pendingUnpair: UnpairCard?
     @State private var unpairHostName = ""
-    @State private var showUnpairConfirmation = false
     @State private var progressText = MoorlanCopy.reachingServer
     @State private var completionText = MoorlanCopy.paired
     @State private var workTask: Task<Void, Never>?
@@ -37,8 +36,7 @@ struct ScannerSheet: View {
                 case .camera:
                     cameraBody
                 case .confirming:
-                    ProgressView("Confirm unpairing \(unpairHostName)")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    unpairConfirmBody
                 case .working:
                     ProgressView(progressText)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -107,16 +105,6 @@ struct ScannerSheet: View {
             } message: {
                 Text(facingError?.message ?? "")
             }
-            .confirmationDialog("\(MoorlanCopy.unpairConfirmTitlePrefix) \(unpairHostName)?", isPresented: $showUnpairConfirmation, titleVisibility: .visible) {
-                Button(MoorlanCopy.unpairConfirmButton, role: .destructive) {
-                    Task { await performUnpair() }
-                }
-                Button("Cancel", role: .cancel) {
-                    Task { await resumeScanning() }
-                }
-            } message: {
-                Text(MoorlanCopy.unpairConfirmMessage)
-            }
             .task {
                 if let initialPayload, !startedInitial {
                     startedInitial = true
@@ -176,6 +164,40 @@ struct ScannerSheet: View {
         .padding(.top, 12)
     }
 
+    /// Inline confirm — `confirmationDialog` often never appears over a sheet
+    /// that just opened from Camera → Open / deep link.
+    private var unpairConfirmBody: some View {
+        VStack(spacing: 20) {
+            Spacer(minLength: 0)
+            Text("\(MoorlanCopy.unpairConfirmTitlePrefix) \(unpairHostName)?")
+                .font(.title2.weight(.semibold))
+                .multilineTextAlignment(.center)
+            Text(MoorlanCopy.unpairConfirmMessage)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            VStack(spacing: 12) {
+                Button(role: .destructive) {
+                    Task { await performUnpair() }
+                } label: {
+                    Text(MoorlanCopy.unpairConfirmButton)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                Button {
+                    Task { await resumeScanning() }
+                } label: {
+                    Text("Cancel")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+            }
+            .padding(.top, 8)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 28)
+    }
+
     private func openSettings() {
         guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
         UIApplication.shared.open(url)
@@ -192,7 +214,6 @@ struct ScannerSheet: View {
                 pendingUnpair = card
                 unpairHostName = server.displayName
                 phase = .confirming
-                showUnpairConfirmation = true
             case .pair(let card):
                 progressText = MoorlanCopy.reachingServer
                 try await tunnel.pair(card: card)
