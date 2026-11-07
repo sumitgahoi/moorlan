@@ -93,8 +93,8 @@ sequenceDiagram
 4. On `POST /v1/pair`: validate label/key → allocate or reuse `/32` → commit peer
    row → reconcile → return lease.
 5. Lease includes `tunnel_network` (pool from live device), `home_networks`,
-   required `dns_servers`, optional `dns_search`, `unpair_token`, endpoint from
-   that iface’s `public-endpoint`, etc. No `prefixes` / `lan`.
+   required `dns_servers`, `name`, optional `dns_search`, `unpair_token`,
+   endpoint from that iface’s `public-endpoint`, etc. No `prefixes` / `lan`.
 
 ### Unpair / admin remove
 
@@ -117,7 +117,7 @@ sequenceDiagram
 
 | Path | Content |
 | --- | --- |
-| `/etc/moorlan/moorlan.yaml` | `private-endpoint`; per-iface `public-endpoint`, `home-networks`, `dns-servers`, optional `dns-search` |
+| `/etc/moorlan/moorlan.yaml` | `private-endpoint`; per-iface `name`, `public-endpoint`, `home-networks`, `dns-servers`, optional `dns-search` |
 | `/usr/share/moorlan/moorlan.yaml.example` | Minimal site template (`interfaces: {}` until configured) |
 | `/var/lib/moorlan/moorlan.db` | Interfaces + peers SoT |
 | `/etc/systemd/system/moorlan-reconcile.service` | Boot reconcile oneshot |

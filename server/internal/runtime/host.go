@@ -18,6 +18,7 @@ type Host struct {
 	Snap         iface.Snapshot
 	StorePath    string
 	PairIP       string
+	Name         string
 	HomeNetworks []string
 	DNSServers   []string
 	DNSSearch    []string
@@ -27,9 +28,12 @@ type Host struct {
 }
 
 // Discover opens an existing WireGuard device for pairing (needs pool + listen port).
-func Discover(wgName, storePath, privateEndpoint string, homeNetworks []string, publicEndpoint string, dnsServers, dnsSearch []string) (Host, error) {
+func Discover(wgName, storePath, privateEndpoint string, homeNetworks []string, publicEndpoint string, dnsServers, dnsSearch []string, name string) (Host, error) {
 	host, err := discover(wgName, storePath, privateEndpoint, homeNetworks, publicEndpoint, true)
 	if err != nil {
+		return Host{}, err
+	}
+	if err := payload.ValidateName(name); err != nil {
 		return Host{}, err
 	}
 	servers, err := parseDNSServers(dnsServers)
@@ -43,6 +47,7 @@ func Discover(wgName, storePath, privateEndpoint string, homeNetworks []string, 
 	if len(search) > 0 && len(servers) == 0 {
 		return Host{}, fmt.Errorf("dns-search requires dns-servers (point phones at the resolver that serves those domains)")
 	}
+	host.Name = strings.TrimSpace(name)
 	host.DNSServers = servers
 	host.DNSSearch = search
 	return host, nil

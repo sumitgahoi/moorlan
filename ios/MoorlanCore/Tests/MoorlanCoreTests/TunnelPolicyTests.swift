@@ -55,16 +55,14 @@ final class TunnelPolicyTests: XCTestCase {
         XCTAssertEqual(policy.decide(path: .wifi(id: "ssid:Cafe")), .connect(fullTunnel: true))
     }
 
-    func testUnknownSSIDFailsClosed() {
-        var policy = TunnelPolicy(networkRouting: ["unidentified": .full, "wifi:en0": .full])
-        policy.networkRouting = policy.networkRouting.filter { $0.key.hasPrefix("ssid:") }
+    func testUnknownSSIDUsesUnmarkedFullNotError() {
         XCTAssertEqual(
             TunnelPolicy().decide(path: .wifi(id: "unidentified")),
-            .disconnect(reason: "Wi‑Fi name unavailable")
+            .connect(fullTunnel: true)
         )
         XCTAssertEqual(
             TunnelPolicy().decide(path: .wifi(id: "wifi:en0")),
-            .disconnect(reason: "Wi‑Fi name unavailable")
+            .connect(fullTunnel: true)
         )
     }
 

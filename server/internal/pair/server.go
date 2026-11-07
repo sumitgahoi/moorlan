@@ -26,6 +26,7 @@ type Lease struct {
 	PersistentKeepalive int      `json:"persistent_keepalive"`
 	UnpairToken         string   `json:"unpair_token"`
 	Label               string   `json:"label"`
+	Name                string   `json:"name"`
 }
 
 type Assigner interface {

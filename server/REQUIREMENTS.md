@@ -81,14 +81,15 @@ Invariants:
 - Canonical path only: `/etc/moorlan/moorlan.yaml`.
 - Shipped example: `/usr/share/moorlan/moorlan.yaml.example` — a minimal
   template with an illustrative `private-endpoint` and `interfaces: {}` so first
-  install manages nothing. Comments appear only where a key is ambiguous; full
-  key docs live here and in [README.md](README.md).
+  install manages nothing. Full interface example lives in [README.md](README.md)
+  as copy-paste YAML (not a commented block in the example file).
 - Root `private-endpoint` is always required. Empty `interfaces` is valid;
   `--reconcile` is a successful no-op. Peer DB path is fixed at
   `/var/lib/moorlan/moorlan.db` (not a YAML key).
-- Under `interfaces.<name>`: `public-endpoint`, `home-networks`, `dns-servers`
-  (required), `dns-search` (optional). Map key `<name>` is the WireGuard
-  interface name.
+- Under `interfaces.<name>`: `name`, `public-endpoint`, `home-networks`,
+  `dns-servers` (required), `dns-search` (optional). Map key `<name>` is the
+  WireGuard interface name. `name` is the tunnel display name phones
+  show after pairing (max 64 characters; same rules as a device label).
 - List-valued keys preserve order as preference order. Unknown keys MUST fail
   load.
 - Site settings come from the YAML file only. No CLI overrides of site keys in v1.
@@ -97,6 +98,8 @@ Invariants:
 
 ### Naming
 
+- `name` / lease `name`: human tunnel name for the phone UI.
+  Distinct from peer `label` (the phone’s device name stored on the server).
 - `home-networks` / lease `home_networks`: IPv4 prefixes the phone routes into
   the tunnel for LAN access when away. Distinct from phone “home Wi‑Fi” SSIDs.
 - `dns-servers` / lease `dns_servers`: required resolvers for the tunnel. The
@@ -161,6 +164,7 @@ moorlan://v1/pair?url=http%3A%2F%2F<private-endpoint>%2Fv1%2Fpair&spk=<server-wg
   - `home_networks` — from that interface’s `home-networks` (list)
   - `dns_servers` — from that interface’s `dns-servers` (required list; order = preference)
   - `dns_search` — optional, from that interface’s `dns-search`
+  - `name` — from that interface’s `name` (tunnel display name)
   - `unpair_token` — per-peer capability
   - `persistent_keepalive`, `mtu`, `label` as applicable
 - Lease MUST NOT use fields `prefixes` or `lan`.

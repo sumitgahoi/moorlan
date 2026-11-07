@@ -11,19 +11,28 @@ const maxLabelRunes = 64
 // ValidateLabel accepts a short admin-visible device name for SQLite and conf comments.
 // Labels need not be unique; admin removal prefers the WireGuard public key.
 func ValidateLabel(label string) error {
-	label = strings.TrimSpace(label)
-	if label == "" {
-		return fmt.Errorf("device label is required")
+	return validateShortName("device label", label)
+}
+
+// ValidateName accepts the tunnel display name from site conf / lease.
+func ValidateName(name string) error {
+	return validateShortName("name", name)
+}
+
+func validateShortName(what, value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fmt.Errorf("%s is required", what)
 	}
-	if !utf8.ValidString(label) {
-		return fmt.Errorf("device label is not valid UTF-8")
+	if !utf8.ValidString(value) {
+		return fmt.Errorf("%s is not valid UTF-8", what)
 	}
-	if utf8.RuneCountInString(label) > maxLabelRunes {
-		return fmt.Errorf("device label is too long")
+	if utf8.RuneCountInString(value) > maxLabelRunes {
+		return fmt.Errorf("%s is too long", what)
 	}
-	for _, r := range label {
+	for _, r := range value {
 		if r < 0x20 || r == 0x7f {
-			return fmt.Errorf("device label contains control characters")
+			return fmt.Errorf("%s contains control characters", what)
 		}
 	}
 	return nil

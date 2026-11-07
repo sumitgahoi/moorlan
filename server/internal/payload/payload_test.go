@@ -53,6 +53,17 @@ func TestValidateLabel(t *testing.T) {
 	}
 }
 
+func TestValidateName(t *testing.T) {
+	if err := ValidateName("Home"); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{"", "  ", "a\nb", strings.Repeat("x", 65)} {
+		if err := ValidateName(bad); err == nil {
+			t.Fatalf("accepted %q", bad)
+		}
+	}
+}
+
 func TestUnpairCardContainsOnlyPublicDiscoveryData(t *testing.T) {
 	card := UnpairCard{V: 1, Action: "unpair", ServerPublicKey: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=", UnpairURL: "http://192.168.1.10:8756/v1/pair"}
 	text, err := MarshalUnpair(card)

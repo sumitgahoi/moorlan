@@ -23,11 +23,27 @@ sudoedit /etc/moorlan/moorlan.yaml
 ```
 
 Install ships a dummy `private-endpoint` and `interfaces: {}` so nothing is
-claimed yet and reconcile succeeds as a no-op. When ready, set `private-endpoint`
-to a LAN address on this host, add an interface stanza, and fill
-`public-endpoint`, `home-networks`, and DNS for your site (see Site conf /
-Notes). On a configured interface, reconciliation removes live peers absent from
-Moorlan's database. Then pair phones under Day to day.
+claimed yet and reconcile succeeds as a no-op. Replace with your values when
+ready (see Site conf / Notes). On a configured interface, reconciliation removes
+live peers absent from Moorlan's database. Then pair phones under Day to day.
+
+```yaml
+private-endpoint: 10.10.10.1:8756
+interfaces:
+  wg0:
+    name: Home
+    public-endpoint: vpn.example.com:51820
+    home-networks:
+      - 10.10.0.0/24
+      - 10.10.10.0/24
+      - 10.10.20.0/24
+      - 10.10.30.0/24
+      - 10.10.40.0/24
+    dns-servers:
+      - 10.10.83.1
+    dns-search:
+      - home.arpa
+```
 
 **Upgrade:** re-run the download step (keeps your YAML and DB).
 
@@ -80,9 +96,10 @@ enroll/unpair lines appear on stderr. Confirm peers with `--list-peers`.
 ## Site conf
 
 `/etc/moorlan/moorlan.yaml` is the only site settings source (no CLI overrides).
-Root `private-endpoint` is shared; each interface has its own `public-endpoint`,
-`home-networks`, and DNS. Changes apply to **new** pair leases — re-pair phones
-to refresh existing ones.
+Root `private-endpoint` is shared; each interface has its own `name`,
+`public-endpoint`, `home-networks`, and DNS. `name` is what phones show
+as the tunnel name after pairing. Changes apply to **new** pair leases — re-pair
+phones to refresh existing ones.
 
 If you remove an interface from YAML, new enroll fails for it; existing peers
 keep working and can still be unpaired.

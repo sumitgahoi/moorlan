@@ -1,27 +1,5 @@
 # LAN address for pair/unpair (must be inside home-networks).
 private-endpoint: 10.10.10.1:8756
 
-# No WireGuard interfaces managed yet. 
+# No managed WireGuard interfaces yet. Paste a stanza from the README when ready.
 interfaces: {}
-
-# Example interface
-# interfaces:
-#   wg0:
-#     # Externally reachable WireGuard host:port
-#     public-endpoint: vpn.example.com:51820
-#
-#     # LAN prefixes phones should reach through the tunnel when away
-#     home-networks:
-#       - 10.10.0.0/24
-#       - 10.10.10.0/24
-#       - 10.10.20.0/24
-#       - 10.10.30.0/24
-#       - 10.10.40.0/24
-#
-#     # Resolver reachable over the tunnel (often this host's WG address)
-#     dns-servers:
-#       - 10.10.83.1
-#
-#     # Optional; carbon → carbon.home.arpa
-#     dns-search:
-#       - home.arpa

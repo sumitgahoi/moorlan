@@ -11,7 +11,8 @@ final class PairingClientTests: XCTestCase {
         homeNetworks: [String] = ["192.168.1.0/24"],
         dnsServers: [String] = ["192.168.1.1"],
         dnsSearch: [String]? = ["home.arpa"],
-        unpairToken: String? = "peer-secret"
+        unpairToken: String? = "peer-secret",
+        name: String? = "Home"
     ) -> Lease {
         Lease(
             address: "10.8.0.2/32",
@@ -22,7 +23,8 @@ final class PairingClientTests: XCTestCase {
             dnsServers: dnsServers,
             dnsSearch: dnsSearch,
             unpairToken: unpairToken,
-            persistentKeepalive: 25
+            persistentKeepalive: 25,
+            name: name
         )
     }
 
@@ -68,13 +70,14 @@ final class PairingClientTests: XCTestCase {
         XCTAssertEqual(card.v, 1)
         XCTAssertEqual(card.serverPublicKey, key)
         let lease = try JSONDecoder().decode(Lease.self, from: Data("""
-        {"address":"10.8.0.2/32","tunnel_network":"10.8.0.0/24","home_networks":["192.168.1.0/24"],"dns_servers":["192.168.1.1"],"dns_search":["home.arpa"],"public_key":"\(key)","endpoint":"vpn.example:51820","persistent_keepalive":25,"unpair_token":"peer-secret"}
+        {"address":"10.8.0.2/32","tunnel_network":"10.8.0.0/24","home_networks":["192.168.1.0/24"],"dns_servers":["192.168.1.1"],"dns_search":["home.arpa"],"public_key":"\(key)","endpoint":"vpn.example:51820","persistent_keepalive":25,"unpair_token":"peer-secret","name":"Home"}
         """.utf8))
         XCTAssertEqual(lease.unpairToken, "peer-secret")
         XCTAssertEqual(lease.tunnelNetwork, "10.8.0.0/24")
         XCTAssertEqual(lease.homeNetworks, ["192.168.1.0/24"])
         XCTAssertEqual(lease.dnsServers, ["192.168.1.1"])
         XCTAssertEqual(lease.dnsSearch, ["home.arpa"])
+        XCTAssertEqual(lease.name, "Home")
     }
 
     func testLeaseRejectsLegacyFieldNames() {
@@ -227,6 +230,15 @@ final class PairingClientTests: XCTestCase {
         XCTAssertEqual(host.displayName, "wg0")
         XCTAssertEqual(card.legacyLAN, "192.168.1.0/24")
         XCTAssertThrowsError(try card.validate())
+    }
+
+    func testDisplayNamePrefersLeaseNameThenLanHost() {
+        let card = QRCard(pairURL: URL(string: "http://192.168.1.10:8756/v1/pair")!, serverPublicKey: key)
+        XCTAssertEqual(PairedServer(card: card, lease: lease(name: "Cabin")).displayName, "Cabin")
+        XCTAssertEqual(PairedServer(card: card, lease: lease(name: nil)).displayName, "192.168.1.10")
+        var renamed = card
+        renamed.legacyName = "My VPN"
+        XCTAssertEqual(PairedServer(card: renamed, lease: lease(name: "Cabin")).displayName, "My VPN")
     }
 
     func testScannerDistinguishesUnpairFromPairing() throws {

@@ -20,6 +20,7 @@ func TestLoadRoundTripKeys(t *testing.T) {
 private-endpoint: 10.10.10.1:8756
 interfaces:
   moorlan0:
+    name: Home
     public-endpoint: vpn.example:51820
     home-networks:
       - 10.10.0.0/24
@@ -40,6 +41,9 @@ interfaces:
 	iface, ok := got.Lookup("moorlan0")
 	if !ok {
 		t.Fatal("missing iface")
+	}
+	if iface.Name != "Home" {
+		t.Fatalf("name: %q", iface.Name)
 	}
 	if iface.PublicEndpoint != "vpn.example:51820" {
 		t.Fatalf("public-endpoint: %q", iface.PublicEndpoint)
@@ -71,6 +75,7 @@ func TestLoadRejectsUnknownKey(t *testing.T) {
 private-endpoint: 10.10.10.1:8756
 interfaces:
   wg0:
+    name: Home
     public-endpoint: vpn.example:51820
     home-networks: [10.10.0.0/24]
     dns-servers: [10.10.10.1]
@@ -87,6 +92,7 @@ db: /tmp/x.db
 private-endpoint: 10.10.10.1:8756
 interfaces:
   wg0:
+    name: Home
     public-endpoint: vpn.example:51820
     home-networks: [10.10.0.0/24]
     dns-servers: [10.10.10.1]
@@ -118,6 +124,7 @@ func TestLoadRejectsLegacyAndMissingRequired(t *testing.T) {
 	writeSite(t, `
 interfaces:
   wg0:
+    name: Home
     public-endpoint: vpn.example:51820
     home-networks: [10.10.0.0/24]
     dns-servers: [10.10.10.1]
@@ -129,11 +136,23 @@ interfaces:
 private-endpoint: 10.10.10.1:8756
 interfaces:
   wg0:
+    name: Home
     home-networks: [10.10.0.0/24]
     dns-servers: [10.10.10.1]
 `)
 	if _, err := Load(); err == nil {
 		t.Fatal("missing public-endpoint accepted")
+	}
+	writeSite(t, `
+private-endpoint: 10.10.10.1:8756
+interfaces:
+  wg0:
+    public-endpoint: vpn.example:51820
+    home-networks: [10.10.0.0/24]
+    dns-servers: [10.10.10.1]
+`)
+	if _, err := Load(); err == nil {
+		t.Fatal("missing name accepted")
 	}
 }
 
@@ -142,10 +161,12 @@ func TestInterfaceNamesStableOrder(t *testing.T) {
 private-endpoint: 10.10.10.1:8756
 interfaces:
   wg1:
+    name: Cabin
     public-endpoint: vpn.example:51821
     home-networks: [10.10.0.0/24]
     dns-servers: [10.10.10.1]
   wg0:
+    name: Home
     public-endpoint: vpn.example:51820
     home-networks: [10.10.0.0/24]
     dns-servers: [10.10.10.1]

@@ -10,7 +10,6 @@ struct ScannerSheet: View {
     @EnvironmentObject private var tunnel: TunnelManager
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.moorlanTheme) private var themeForCheer
     @StateObject private var model = ScannerModel()
     @State private var phase: Phase = .camera
     @State private var facingError: UserFacingError?
@@ -48,15 +47,7 @@ struct ScannerSheet: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background {
-                Group {
-                    if phase == .done {
-                        Color.clear.moorlanCanvas(theme: themeForCheer)
-                    } else {
-                        Color(.systemBackground)
-                    }
-                }
-            }
+            .background(Color(.systemBackground))
             .navigationTitle(MoorlanCopy.scanTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -489,6 +480,36 @@ extension UserFacingError {
             }
         }
         return map(error)
+    }
+}
+
+/// Native pair/unpair completion — system checkmark, no prototype theme wash.
+private struct PairSuccessView: View {
+    var title: String
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var appeared = false
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 64))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(.tint)
+                .scaleEffect(appeared ? 1 : 0.7)
+            Text(title)
+                .font(.title2.weight(.semibold))
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onAppear {
+            if reduceMotion {
+                appeared = true
+            } else {
+                withAnimation(.spring(response: 0.45, dampingFraction: 0.7)) {
+                    appeared = true
+                }
+            }
+        }
     }
 }
 

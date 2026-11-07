@@ -50,12 +50,16 @@ final class TunnelManager: ObservableObject {
     private var handshakeWaitStartedAt: Date?
     private var handshakeFailTask: Task<Void, Never>?
     private var lastTemporaryPathID: String?
+    /// Last decision pushed to the VPN; kept across transitional path flips.
+    private var lastAppliedDecision: TunnelPolicy.Decision?
 
     private static let handshakeFreshSeconds: TimeInterval = 180
     private static let handshakeTimeoutSeconds: TimeInterval = 25
 
     var selectedServer: PairedServer? { servers.first { $0.id == selectedServerID } ?? servers.first }
     var pathKind: TunnelPolicy.PathKind { pathMonitor.snapshot.kind }
+    /// False while path identity is settling; policy uses Full until then.
+    var isPathStable: Bool { pathMonitor.snapshot.isStable }
     var currentNetworkID: String? {
         guard let id = pathMonitor.snapshot.wifiNetworkID, id.hasPrefix("ssid:") else { return nil }
         return id
@@ -64,7 +68,7 @@ final class TunnelManager: ObservableObject {
     /// Path key for temporary routing (SSID id or cellular).
     var currentPathID: String? {
         switch pathKind {
-        case .wifi(let id) where id.hasPrefix("ssid:") && id != "unidentified":
+        case .wifi(let id) where PathIdentity.isKnownSSID(id):
             return id
         case .cellular:
             return Self.cellularPathID
@@ -73,15 +77,10 @@ final class TunnelManager: ObservableObject {
         }
     }
 
-    var wifiIdentityMissing: Bool {
-        if case .wifi(let id) = pathKind {
-            return !id.hasPrefix("ssid:") || id == "unidentified"
-        }
-        return false
-    }
-
     /// Effective routing for the current path (temporary ?? permanent).
+    /// During unsettled path changes the tunnel is Full — not Off.
     var effectiveRouting: NetworkRouting? {
+        if !isPathStable { return .full }
         guard let pathID = currentPathID else { return nil }
         if let temp = temporaryRouting, temp.pathID == pathID {
             return temp.value
@@ -93,34 +92,34 @@ final class TunnelManager: ObservableObject {
     }
 
     var isOffOnCurrentPath: Bool {
-        effectiveRouting == .off
+        guard isPathStable else { return false }
+        return effectiveRouting == .off
     }
 
     var effectiveFullTunnel: Bool {
-        if case .connect(let full) = decideCurrent() { return full }
+        if case .connect(let full) = displayedDecision() { return full }
         return false
     }
 
     var statusHeadline: String {
-        if wifiIdentityMissing { return "Waiting for Wi‑Fi name" }
         if isOffOnCurrentPath { return "Off on this network" }
         switch status {
         case .connected:
             return effectiveFullTunnel ? "Connected · Full" : "Connected · Split"
-        case .connecting: return "Connecting…"
+        case .connecting:
+            if !isPathStable {
+                return "Connected · Full"
+            }
+            return "Connecting…"
         case .disconnecting: return "Disconnecting…"
         case .invalid: return "Needs attention"
         case .disconnected:
             if statusReason == "Waiting for a network" { return "Waiting for a network" }
-            if statusReason == "Wi‑Fi name unavailable" { return "Waiting for Wi‑Fi name" }
             return "Disconnected"
         }
     }
 
     var statusDetail: String {
-        if wifiIdentityMissing || statusReason == "Wi‑Fi name unavailable" {
-            return "Moorlan needs this network’s name before connecting."
-        }
         if isOffOnCurrentPath {
             return "Tunnel stays off here. Change in Settings to save permanently."
         }
@@ -130,6 +129,9 @@ final class TunnelManager: ObservableObject {
                 ? "All traffic goes through home."
                 : "Only home networks are reached through the tunnel."
         case .connecting:
+            if !isPathStable {
+                return "Switching networks…"
+            }
             return networkExtensionConnected
                 ? "Tunnel is up; waiting for a handshake with home…"
                 : "Reaching your home…"
@@ -254,6 +256,22 @@ final class TunnelManager: ObservableObject {
         userWantsTunnel = routing != .off
         lastProfile = nil
         Task { await applyDesiredState() }
+    }
+
+    /// Rename a paired host (display name only). Does not change selection or tunnel state.
+    func renameServer(_ id: String, displayName: String) {
+        let trimmed = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              let index = servers.firstIndex(where: { $0.id == id }) else { return }
+        var server = servers[index]
+        server.card.legacyName = trimmed
+        do {
+            try store.upsert(server)
+            servers = try store.loadServers()
+            Task { await refreshProfileDescription(for: server) }
+        } catch {
+            present(error)
+        }
     }
 
     /// Known SSIDs: current + any permanently stored.
@@ -514,10 +532,28 @@ final class TunnelManager: ObservableObject {
         return policy.decide(path: pathKind, override: override)
     }
 
+    /// Decision shown in UI: Full while settling; else path policy.
+    private func displayedDecision() -> TunnelPolicy.Decision {
+        if !isPathStable {
+            return .connect(fullTunnel: true)
+        }
+        return decideCurrent()
+    }
+
     private func applyOnce() async {
         guard let server = selectedServer else { await disconnect(); return }
         guard !pathMonitor.snapshot.saturated else { statusReason = "Waiting for a network"; return }
-        let decision = decideCurrent()
+
+        // Network change / unknown SSID: Full until the path settles, then real policy.
+        let decision: TunnelPolicy.Decision = pathMonitor.snapshot.isStable
+            ? decideCurrent()
+            : .connect(fullTunnel: true)
+
+        if decision == lastAppliedDecision {
+            await reconcileVPN(to: decision, reloadTunnel: false)
+            return
+        }
+
         do {
             let profile = makeProfile(server)
             let changed = profile != lastProfile
@@ -525,50 +561,79 @@ final class TunnelManager: ObservableObject {
                 manager = try await configureProfile(server, enableOnDemand: onDemandActiveID == server.id)
                 lastProfile = profile
             }
-            switch decision {
-            case .disconnect(let reason):
-                if reason == "Wi‑Fi name unavailable", statusReason != reason {
-                    present(MoorlanError.wifiNameUnavailable)
-                }
-                statusReason = reason
-                intentionalDisconnect = true
-                userWantsTunnel = false
-                await disconnect()
-            case .connect:
-                statusReason = nil
-                userWantsTunnel = true
-                if presentedError?.title == UserFacingError.map(.wifiNameUnavailable).title {
-                    clearPresentedError()
-                }
-                guard userWantsTunnel, let manager else {
-                    refreshStatus()
-                    return
-                }
-                if manager.connection.status == .connected {
-                    if changed, let session = manager.connection as? NETunnelProviderSession {
-                        try session.sendProviderMessage(Data("reload-policy".utf8)) { _ in }
-                    }
-                } else if manager.connection.status != .connecting
-                            && manager.connection.status != .disconnecting
-                            && manager.connection.status != .reasserting {
-                    do {
-                        try manager.connection.startVPNTunnel()
-                    } catch {
-                        present(mapStartFailure(error))
-                        status = .invalid
-                        return
-                    }
-                }
-                refreshStatus()
-            }
+            let previous = lastAppliedDecision
+            lastAppliedDecision = decision
+            let routingFlipped = Self.connectRoutingFlipped(from: previous, to: decision)
+            await reconcileVPN(to: decision, reloadTunnel: changed || routingFlipped)
         } catch {
             present(mapConfigurationFailure(error))
             status = .invalid
         }
     }
 
+    private static func connectRoutingFlipped(
+        from previous: TunnelPolicy.Decision?,
+        to next: TunnelPolicy.Decision
+    ) -> Bool {
+        guard case .connect(let newFull) = next else { return false }
+        guard case .connect(let oldFull) = previous else { return true }
+        return oldFull != newFull
+    }
+
+    private func reconcileVPN(to decision: TunnelPolicy.Decision, reloadTunnel: Bool) async {
+        switch decision {
+        case .disconnect(let reason):
+            statusReason = reason
+            intentionalDisconnect = true
+            userWantsTunnel = false
+            await disconnect()
+        case .connect:
+            statusReason = nil
+            userWantsTunnel = true
+            if presentedError?.title == UserFacingError.map(.wifiNameUnavailable).title {
+                clearPresentedError()
+            }
+            guard let manager else {
+                refreshStatus()
+                return
+            }
+            if manager.connection.status == .connected {
+                if reloadTunnel, let session = manager.connection as? NETunnelProviderSession {
+                    try? session.sendProviderMessage(Data("reload-policy".utf8)) { _ in }
+                }
+            } else if manager.connection.status != .connecting
+                        && manager.connection.status != .disconnecting
+                        && manager.connection.status != .reasserting {
+                do {
+                    try manager.connection.startVPNTunnel()
+                } catch {
+                    present(mapStartFailure(error))
+                    status = .invalid
+                    return
+                }
+            }
+            refreshStatus()
+        }
+    }
+
     private func makeProfile(_ server: PairedServer) -> TunnelProfile {
         TunnelProfile(server: server, policy: policy)
+    }
+
+    private func refreshProfileDescription(for server: PairedServer) async {
+        do {
+            let installed = try await NETunnelProviderManager.moorlan_loadAllFromPreferences()
+            guard let profile = installed.first(where: { moorlanProfileID($0) == server.id }) else { return }
+            let next = "Moorlan · \(server.displayName)"
+            guard profile.localizedDescription != next else { return }
+            profile.localizedDescription = next
+            try await profile.moorlan_saveToPreferences()
+            if selectedServerID == server.id {
+                manager = profile
+            }
+        } catch {
+            // Display name in-app already updated; VPN Settings label can catch up next configure.
+        }
     }
 
     private func configureProfile(_ server: PairedServer, enableOnDemand: Bool) async throws -> NETunnelProviderManager {
@@ -672,7 +737,9 @@ final class TunnelManager: ObservableObject {
         pathMonitor.$snapshot.removeDuplicates().sink { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
-                self.clearTemporaryIfPathChanged()
+                if self.pathMonitor.snapshot.isStable {
+                    self.clearTemporaryIfPathChanged()
+                }
                 await self.applyDesiredState()
             }
         }.store(in: &cancellables)
@@ -724,7 +791,7 @@ final class TunnelManager: ObservableObject {
             && userWantsTunnel
             && !wasIntentional
             && !isOffOnCurrentPath
-            && !wifiIdentityMissing
+            && isPathStable
             && selectedServer != nil {
             present(MoorlanError.tunnelStopped)
         }

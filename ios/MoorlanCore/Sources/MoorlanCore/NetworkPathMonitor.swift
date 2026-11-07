@@ -5,6 +5,10 @@ import NetworkExtension
 #endif
 
 /// Observes the current path and classifies it for TunnelPolicy.
+///
+/// Stable = named Wi‑Fi or cellular-only. Otherwise `isStable == false` and
+/// app/extension keep **Full** until a stable identity appears (indefinitely if
+/// SSID never arrives). Missing SSID is never a user-facing error.
 @MainActor
 public final class NetworkPathMonitor: ObservableObject {
     public struct Snapshot: Equatable, Sendable {
@@ -12,28 +16,36 @@ public final class NetworkPathMonitor: ObservableObject {
         public var interfaces: [String]
         public var saturated: Bool
         public var wifiNetworkID: String?
+        /// False while unsettled; policy should use Full.
+        public var isStable: Bool
 
-        public init(kind: TunnelPolicy.PathKind, interfaces: [String] = [], saturated: Bool = true, wifiNetworkID: String? = nil) {
+        public init(
+            kind: TunnelPolicy.PathKind,
+            interfaces: [String] = [],
+            saturated: Bool = true,
+            wifiNetworkID: String? = nil,
+            isStable: Bool = true
+        ) {
             self.kind = kind
             self.interfaces = interfaces
             self.saturated = saturated
             self.wifiNetworkID = wifiNetworkID
+            self.isStable = isStable
         }
     }
 
-    @Published public private(set) var snapshot = Snapshot(kind: .other)
+    @Published public private(set) var snapshot = Snapshot(kind: .other, isStable: false)
 
     private let monitor = NWPathMonitor()
     private let queue = DispatchQueue(label: "moorlan.path")
     private var latestPath: Network.NWPath?
     private var pathGeneration = 0
-    /// Optional richer Wi‑Fi id (e.g. `ssid:Home`) supplied by the app after NEHotspotNetwork lookup.
     private var wifiOverrideID: String?
 
     public init() {}
 
     public func setWiFiNetworkID(_ id: String?) {
-        wifiOverrideID = id
+        wifiOverrideID = normalizedSSID(id)
         if let latestPath {
             apply(latestPath)
         }
@@ -48,8 +60,6 @@ public final class NetworkPathMonitor: ObservableObject {
                 let generation = self.pathGeneration
                 #if os(iOS)
                 if path.usesInterfaceType(.wifi) {
-                    // Read the current association before publishing it; never
-                    // reuse the previous SSID or trust an interface fingerprint.
                     NEHotspotNetwork.fetchCurrent { network in
                         let ssid = network?.ssid
                         Task { @MainActor in
@@ -77,24 +87,41 @@ public final class NetworkPathMonitor: ObservableObject {
 
     private func apply(_ path: Network.NWPath) {
         let interfaces = path.availableInterfaces.map(\.name)
-        let kind: TunnelPolicy.PathKind
-        if path.usesInterfaceType(.cellular) && !path.usesInterfaceType(.wifi) {
-            kind = .cellular
-        } else if path.usesInterfaceType(.wifi) {
-            kind = .wifi(id: wifiFingerprint(interfaces: interfaces))
-        } else {
-            kind = .other
+        let hasCellular = path.usesInterfaceType(.cellular)
+        let hasWiFi = path.usesInterfaceType(.wifi)
+        let wifiID = wifiOverrideID.flatMap { PathIdentity.isKnownSSID($0) ? $0 : nil }
+        let saturated = path.status != .satisfied
+
+        switch PathIdentity.classify(
+            hasWiFi: hasWiFi,
+            hasCellular: hasCellular,
+            wifiNetworkID: wifiID
+        ) {
+        case .stable(let kind):
+            let publishedWiFiID: String? = {
+                if case .wifi(let id) = kind, PathIdentity.isKnownSSID(id) { return id }
+                return nil
+            }()
+            snapshot = Snapshot(
+                kind: kind,
+                interfaces: interfaces,
+                saturated: saturated,
+                wifiNetworkID: publishedWiFiID,
+                isStable: true
+            )
+        case .transitional:
+            snapshot = Snapshot(
+                kind: snapshot.kind,
+                interfaces: interfaces,
+                saturated: saturated,
+                wifiNetworkID: snapshot.wifiNetworkID,
+                isStable: false
+            )
         }
-        snapshot = Snapshot(kind: kind, interfaces: interfaces, saturated: path.status != .satisfied, wifiNetworkID: wifiOverrideID)
     }
 
-    private func wifiFingerprint(interfaces: [String]) -> String {
-        if let wifiOverrideID, !wifiOverrideID.isEmpty {
-            return wifiOverrideID
-        }
-        // Interface names (en0) are hardware, not network identity. Unknown SSID
-        // stays "unidentified"; TunnelPolicy fails closed (disconnect, never exit).
-        _ = interfaces
-        return "unidentified"
+    private func normalizedSSID(_ id: String?) -> String? {
+        guard let id, PathIdentity.isKnownSSID(id) else { return nil }
+        return id
     }
 }

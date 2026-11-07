@@ -236,5 +236,6 @@ func (a *Assigner) Assign(ctx context.Context, publicKey, label string) (pair.Le
 		PersistentKeepalive: 25,
 		UnpairToken:         credential,
 		Label:               label,
+		Name:                a.Host.Name,
 	}, nil
 }

@@ -13,6 +13,8 @@ public struct Lease: Codable, Equatable, Sendable {
     public var unpairToken: String?
     public var persistentKeepalive: Int?
     public var label: String?
+    /// Tunnel display name from server site conf (`name`).
+    public var name: String?
 
     enum CodingKeys: String, CodingKey {
         case address
@@ -26,6 +28,7 @@ public struct Lease: Codable, Equatable, Sendable {
         case unpairToken = "unpair_token"
         case persistentKeepalive = "persistent_keepalive"
         case label
+        case name
     }
 
     public init(
@@ -39,7 +42,8 @@ public struct Lease: Codable, Equatable, Sendable {
         dnsSearch: [String]? = nil,
         unpairToken: String? = nil,
         persistentKeepalive: Int? = nil,
-        label: String? = nil
+        label: String? = nil,
+        name: String? = nil
     ) {
         self.address = address
         self.tunnelNetwork = tunnelNetwork
@@ -52,6 +56,7 @@ public struct Lease: Codable, Equatable, Sendable {
         self.unpairToken = unpairToken
         self.persistentKeepalive = persistentKeepalive
         self.label = label
+        self.name = name
     }
 }
 
@@ -64,7 +69,15 @@ public struct PairedServer: Codable, Equatable, Sendable, Identifiable {
     public var homeSSIDs: Set<String>
 
     public var publicKey: String { lease.publicKey }
-    public var displayName: String { card.legacyName ?? card.lanHost ?? "WireGuard" }
+    public var displayName: String {
+        if let renamed = card.legacyName?.trimmingCharacters(in: .whitespacesAndNewlines), !renamed.isEmpty {
+            return renamed
+        }
+        if let name = lease.name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
+            return name
+        }
+        return card.lanHost ?? "WireGuard"
+    }
 
     public var serverDNSDescription: String {
         let dns = lease.dnsServers.filter { !$0.isEmpty }

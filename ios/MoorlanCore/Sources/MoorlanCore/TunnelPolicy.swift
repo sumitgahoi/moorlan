@@ -121,12 +121,18 @@ public struct TunnelPolicy: Equatable, Codable, Sendable {
     }
 
     /// Decide with an optional temporary override for the current path.
+    ///
+    /// Callers must not invoke this for transitional / unknown-SSID moments —
+    /// they keep the last applied decision. A non-`ssid:` Wi‑Fi id is treated
+    /// like unmarked Wi‑Fi (Full), never as a user-facing error.
     public func decide(path: PathKind, override: NetworkRouting?) -> Decision {
         if case .wifi(let id) = path {
-            if !id.hasPrefix("ssid:") || id == "unidentified" {
-                return .disconnect(reason: "Wi‑Fi name unavailable")
+            if PathIdentity.isKnownSSID(id) {
+                let routing = override ?? permanentRouting(forNetworkID: id)
+                return decision(for: routing, offReason: "Off on this network")
             }
-            let routing = override ?? permanentRouting(forNetworkID: id)
+            // Unknown name: same as unmarked Wi‑Fi default (Full), not an error.
+            let routing = override ?? .full
             return decision(for: routing, offReason: "Off on this network")
         }
         switch path {
@@ -136,7 +142,7 @@ public struct TunnelPolicy: Equatable, Codable, Sendable {
         case .other:
             return .connect(fullTunnel: true)
         case .wifi:
-            return .disconnect(reason: "Wi‑Fi name unavailable")
+            return .connect(fullTunnel: true)
         }
     }
 

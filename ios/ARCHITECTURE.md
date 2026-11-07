@@ -34,7 +34,7 @@ flowchart LR
 
 | Owner | Responsibility |
 | --- | --- |
-| Server lease | `tunnel_network`, `home_networks`, `dns_servers`, `dns_search`, endpoint, address, keys, token |
+| Server lease | `tunnel_network`, `home_networks`, `dns_servers`, `dns_search`, `name`, endpoint, address, keys, token |
 | App storage | Host records (full lease including `unpair_token`), selection, on-demand-active id, permanent routing map |
 | App Group | Extension profile per host — no private key, no `unpair_token` |
 | Keychain | One long-lived client WireGuard private key |
@@ -67,14 +67,17 @@ reads `unpair_token`.
 5. Install `NETunnelProviderManager` for this server key.
 6. Write App Group `TunnelProfile` with token stripped.
 7. First/only tunnel → auto on-demand active; else ask to make default.
-8. Show status home with the new tunnel selected.
+8. Show the tunnel list home with the new tunnel selected.
 
 ### Policy (roaming)
 
-1. Observe network path + Apple Wi‑Fi identity (SSID).
+1. Observe network path + Apple Wi‑Fi identity (SSID). Unsettled → **Full**.
+   Stable (named Wi‑Fi or cellular-only) → real path policy if it differs. If
+   never stable, remain Full. Missing SSID is not an error.
 2. **Effective** routing (app): temporary Home override for current path, else
    permanent map (Wi‑Fi default Full; cellular default Split).
-3. Extension / on-demand: **permanent** map only.
+3. Extension / on-demand: **permanent** map only. On-demand Disconnect/Connect
+   rules are the system-native evaluator for Off SSIDs.
 4. Off → disconnect; Split → subnet AllowedIPs; Full → plus `0.0.0.0/0` (never
    `::/0`). DNS host routes required because WireGuardKit sends all queries to
    lease DNS.
@@ -109,7 +112,9 @@ error (title + sentence + Retry). Only one VPN can be active at a time.
 
 - HIG-native SwiftUI (`NavigationStack`, inset grouped lists/forms, SF Symbols).
   See [REQUIREMENTS.md](REQUIREMENTS.md) §8.
-- Home: temporary Off/Split/Full; tunnel list with Default / Use as default.
+- Home: quiet tunnel list (name + status pill); tap opens details. Temporary
+  Off/Split/Full via card menu; Settings keeps permanent routing. No prototype
+  theme switcher / power button / connection diagram.
 - Settings: permanent cellular + Wi‑Fi routing.
 - Errors: title + one sentence + action. No raw NE / URL error strings in UI.
 - Accessibility: Dynamic Type, VoiceOver, Reduce Motion.

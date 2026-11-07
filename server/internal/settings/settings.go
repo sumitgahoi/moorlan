@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 
+	"moorlan/internal/payload"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -24,6 +26,8 @@ type Site struct {
 }
 
 // Interface is static settings for one WireGuard interface.
+// Name is the tunnel display name from YAML `name` (not the map key, which is
+// the WireGuard interface name).
 type Interface struct {
 	Name           string
 	PublicEndpoint string
@@ -38,6 +42,7 @@ type file struct {
 }
 
 type ifaceFile struct {
+	Name           string   `yaml:"name"`
 	PublicEndpoint string   `yaml:"public-endpoint"`
 	HomeNetworks   []string `yaml:"home-networks"`
 	DNSServers     []string `yaml:"dns-servers"`
@@ -73,11 +78,14 @@ func Load() (Site, error) {
 			return Site{}, fmt.Errorf("%s: interfaces contains an empty name", Path)
 		}
 		iface := Interface{
-			Name:           name,
+			Name:           strings.TrimSpace(cfg.Name),
 			PublicEndpoint: strings.TrimSpace(cfg.PublicEndpoint),
 			HomeNetworks:   trimList(cfg.HomeNetworks),
 			DNSServers:     trimList(cfg.DNSServers),
 			DNSSearch:      trimList(cfg.DNSSearch),
+		}
+		if err := payload.ValidateName(iface.Name); err != nil {
+			return Site{}, fmt.Errorf("%s: interfaces.%s.name: %w", Path, name, err)
 		}
 		if iface.PublicEndpoint == "" {
 			return Site{}, fmt.Errorf("%s: interfaces.%s.public-endpoint is required", Path, name)

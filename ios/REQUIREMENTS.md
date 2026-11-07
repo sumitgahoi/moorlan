@@ -31,8 +31,9 @@ Authoritative product contract for the iPhone / iPad app and Packet Tunnel
 - **VPN configuration** — Apple “Add VPN Configurations” MUST be approved;
   install a distinct profile even when Off policy will keep the tunnel down.
 - **Wi‑Fi Information** (+ Precise Location While Using when needed) — SSID only,
-  no coordinates. Unavailable SSID → network id `unidentified`. NEVER trust a
-  reused interface name (`en0`).
+  no coordinates. Unavailable SSID → stay Full until a stable path (named Wi‑Fi
+  or cellular-only); never a user error. NEVER trust a reused interface name
+  (`en0`).
 - Physical-device entitlement behavior is authoritative; simulator is not.
 
 ## 3. Ownership
@@ -84,12 +85,16 @@ Each named Wi‑Fi and cellular has a routing policy:
 - Multiple SSIDs may be permanently Off.
 - No join prompt for new Wi‑Fi. No separate power button or Exit Node toggle —
   Off / Split / Full is the path control.
-- Unidentified / non-`ssid:` Wi‑Fi → disconnect (fail closed).
-- Policy MUST run in the app **and** the Packet Tunnel extension on path
-  changes. Extension and on-demand use the **permanent** map only.
+- On network switch / unsettled path: apply **Full** until stable. Stable =
+  named Wi‑Fi or cellular-only. Then apply that path’s Off / Split / Full only
+  if it differs. If never stable (e.g. Wi‑Fi with no SSID forever), remain Full.
+  Missing SSID is not an error.
+- Policy MUST run in the app **and** the Packet Tunnel extension on **stable**
+  path changes. Extension and on-demand use the **permanent** map only.
 - On-demand: when the default tunnel has ≥1 permanent Off SSID → Disconnect on
   those SSIDs / Connect elsewhere; with zero Off SSIDs, disable on-demand (avoid
-  reconnect loops).
+  reconnect loops). On-demand is the system-native connect/disconnect path for
+  Off SSIDs.
 
 ### AllowedIPs and DNS
 
@@ -114,6 +119,9 @@ Protocol MUST match [server/REQUIREMENTS.md](../server/REQUIREMENTS.md) §7.
   URL scheme → enroll. In-app scanner is a **fallback** only.
 - `POST /v1/pair` with peer `public_key` and editable device **label**.
 - Verify lease `public_key` equals QR `spk`.
+- Name the tunnel from lease `name` (server site conf). The user MAY
+  rename locally afterward; a local rename overrides `name` until
+  cleared.
 - Persist lease; install VPN profile. On success: confirmation, then status home
   with the new tunnel. **MUST** mark current SSID permanently Off when
   identifiable. Then apply on-demand default rules in §4.
@@ -176,7 +184,7 @@ MUST map at least: camera / local-network / VPN permission denied; pair
 unreachable; pair rejected; lease incomplete; VPN configuration failed; **tunnel
 superseded by another VPN** (e.g. Tailscale) with copy that only one VPN can be
 active and Retry when Moorlan can resume; unpair not on Off Wi‑Fi; unpair not
-acknowledged; Wi‑Fi name unavailable.
+acknowledged. Missing Wi‑Fi name is **not** a user-facing error.
 
 ## 9. Non-goals (v1)
 

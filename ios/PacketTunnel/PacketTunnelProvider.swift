@@ -84,7 +84,11 @@ private final class TunnelController {
             if !monitor.snapshot.saturated { break }
             try await Task.sleep(nanoseconds: 50_000_000)
         }
-        guard case .connect(let full) = profile.policy.decide(path: monitor.snapshot.kind) else {
+        // Unsettled (e.g. Wi‑Fi, no SSID) → Full; stable → real policy.
+        let startDecision: TunnelPolicy.Decision = monitor.snapshot.isStable
+            ? profile.policy.decide(path: monitor.snapshot.kind)
+            : .connect(fullTunnel: true)
+        guard case .connect(let full) = startDecision else {
             monitor.stop()
             throw MoorlanError.tunnelFailed("Tunnel stays off on this network")
         }
@@ -130,7 +134,11 @@ private final class TunnelController {
         repeat {
             pending = false
             guard let profile, !monitor.snapshot.saturated else { return }
-            switch profile.policy.decide(path: monitor.snapshot.kind) {
+            // Unsettled path → Full; settled → real permanent policy.
+            let decision: TunnelPolicy.Decision = monitor.snapshot.isStable
+                ? profile.policy.decide(path: monitor.snapshot.kind)
+                : .connect(fullTunnel: true)
+            switch decision {
             case .disconnect:
                 await stop()
                 provider.cancelTunnelWithError(nil)

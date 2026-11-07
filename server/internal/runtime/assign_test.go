@@ -65,6 +65,7 @@ func fixture(t *testing.T) (*Assigner, *fakeWG, wgtypes.Key) {
 		Host: Host{
 			StorePath:    dbPath,
 			Snap:         iface.Snapshot{Name: "moorlan0", PublicKey: fake.device.PublicKey.String(), Addresses: []string{"10.8.0.1/24"}, MTU: 1420},
+			Name:         "Home",
 			HomeNetworks: []string{"192.168.1.0/24"},
 			DNSServers:   []string{"192.168.1.1", "1.1.1.1"},
 			DNSSearch:    []string{"home.arpa"},
@@ -103,6 +104,9 @@ func TestAssignPersistsAndRetriesWithoutChangingLivePeer(t *testing.T) {
 	}
 	if len(first.DNSSearch) != 1 || first.DNSSearch[0] != "home.arpa" {
 		t.Fatalf("dns_search: %+v", first.DNSSearch)
+	}
+	if first.Name != "Home" {
+		t.Fatalf("name: %q", first.Name)
 	}
 	if len(first.UnpairToken) != 64 {
 		t.Fatal("expected plaintext HMAC credential")

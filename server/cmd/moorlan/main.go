@@ -115,7 +115,7 @@ func run() error {
 		if !ok {
 			return fmt.Errorf("interface %s is not listed in %s", name, settings.Path)
 		}
-		host, err = runtime.Discover(name, storePath, site.PrivateEndpoint, cfg.HomeNetworks, cfg.PublicEndpoint, cfg.DNSServers, cfg.DNSSearch)
+		host, err = runtime.Discover(name, storePath, site.PrivateEndpoint, cfg.HomeNetworks, cfg.PublicEndpoint, cfg.DNSServers, cfg.DNSSearch, cfg.Name)
 	}
 	if err != nil {
 		return err
