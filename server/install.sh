@@ -31,6 +31,6 @@ fi
 
 echo "moorlan: binary installed; running --setup"
 if ! /usr/local/bin/moorlan --setup; then
-  echo "moorlan: --setup failed (is WireGuard up?). Binary is installed; later run: sudo moorlan --setup" >&2
+  echo "moorlan: --setup failed. Binary is installed; fix the error above, then: sudo moorlan --setup" >&2
   exit 0
 fi

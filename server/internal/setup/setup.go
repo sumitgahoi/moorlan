@@ -74,6 +74,12 @@ func Run(opts Options) error {
 		return err
 	}
 
+	if err := systemd.Start(); err != nil {
+		fmt.Fprintf(stderr, "moorlan: reconcile start skipped (%v); runs on boot or: sudo moorlan --reconcile\n", err)
+	} else {
+		fmt.Fprintf(stderr, "moorlan: reconcile oneshot started\n")
+	}
+
 	printSummary(stdout, merged)
 	fmt.Fprintf(stderr, "\nReview %s (set enabled: true on interfaces to manage),\nthen: sudo moorlan --pair\n", settings.Path)
 	return nil
