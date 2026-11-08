@@ -48,8 +48,9 @@ In-app scan is a fallback if Camera did not open the app. See
 
 - **Off / Split / Full** from the tunnel-list menu on the current network —
   saved for next time. App launch only shows status (does not bounce the VPN).
-- **Default** tunnel (at most one) auto-connects when away from Off Wi‑Fi. After
-  pairing a second house, the app asks whether to make it the default.
+- **Default** tunnel (at most one) auto-connects when away from Off Wi‑Fi. The
+  first tunnel is default automatically; with multiple tunnels, tap a star to
+  choose which one is default.
 - **Unpair:** on the server run `sudo moorlan --unpair --interface wg0`; in the
   app scan the unpair QR while on an Off Wi‑Fi. Only **HTTP 204** clears the
   local profile. Other tunnels and the shared Keychain identity stay.

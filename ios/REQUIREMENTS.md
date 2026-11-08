@@ -58,11 +58,13 @@ tunnel down (hairpin). `home_networks` are away split-tunnel LAN routes.
 - Exactly one tunnel may be **on-demand active** (Default). Activating a tunnel
   MUST turn on-demand **off** on every other Moorlan profile.
 - Selecting a tunnel in the list for viewing/manual connect MUST NOT steal
-  on-demand unless the user explicitly chooses **Use as default**.
+  on-demand. Changing default is explicit via the star on the tunnel card.
 - After pair:
   - **First / only** tunnel → auto-activate as on-demand default (no prompt).
-  - If other tunnels already exist → ask **Use as your default?**; Yes activates
-    the new tunnel (others off); No keeps the previous default.
+  - If other tunnels already exist → keep the previous default; do not prompt.
+- When more than one tunnel exists, each card shows a star. Tap an empty star to
+  make that tunnel the default; confirm with a short toast. The filled star is
+  the current default (not tappable).
 - Unpair of the active default: if one tunnel remains → auto-activate it; else
   leave none active until the user picks.
 - Pairing another host MUST NOT delete existing tunnels. Unpair removes **one**
@@ -171,7 +173,8 @@ routing is in-memory only.
   scale or hard-code a light-only palette that breaks Dark Mode.
 - Home: prominent Off/Split/Full path control for the current network (durable)
   with About Routing info sheet; status pill (Off / Connected / …) on the
-  selected tunnel; on-demand default marked by card tint (not a pill). Tap a
+  selected tunnel; on-demand default marked by card tint + star (not a pill).
+  With multiple tunnels, tap a star to set default (toast confirms). Tap a
   tunnel for details. Camera toolbar scans pair/unpair QR. No Settings screen;
   no power button; no Exit Node toggle.
 - **Connected** means a live WireGuard handshake with the paired peer (UAPI

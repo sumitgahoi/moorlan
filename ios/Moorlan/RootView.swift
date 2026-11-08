@@ -44,26 +44,6 @@ struct RootView: View {
         } message: { error in
             Text(error.message)
         }
-        .alert(
-            MoorlanCopy.useAsDefaultTitle,
-            isPresented: Binding(
-                get: {
-                    tunnel.pendingDefaultPromptServerID != nil
-                        && !showScanner
-                        && tunnel.presentedError == nil
-                },
-                set: { if !$0 { tunnel.declinePendingAsDefault() } }
-            )
-        ) {
-            Button(MoorlanCopy.useAsDefaultYes) {
-                Task { await tunnel.acceptPendingAsDefault() }
-            }
-            Button(MoorlanCopy.useAsDefaultNo, role: .cancel) {
-                tunnel.declinePendingAsDefault()
-            }
-        } message: {
-            Text(MoorlanCopy.useAsDefaultMessage)
-        }
         .sheet(isPresented: $showScanner, onDismiss: { invitePayload = nil }) {
             ScannerSheet(initialPayload: invitePayload)
                 .environmentObject(tunnel)

@@ -51,12 +51,11 @@ enum MoorlanCopy {
         "This tunnel auto-connects when you’re away from Off networks. Other tunnels do not."
     static let connectedBadge = "Connected"
     static let offHereBadge = "Off"
-    static let useAsDefault = "Use as default"
-    static let useAsDefaultTitle = "Use as your default?"
-    static let useAsDefaultMessage =
-        "This tunnel will auto-connect when you’re away. Other tunnels will stop auto-connecting."
-    static let useAsDefaultYes = "Use as default"
-    static let useAsDefaultNo = "Not now"
+    static let makeDefaultA11y = "Make default"
+    static let defaultStarA11y = "Default tunnel"
+    static func madeDefaultToast(_ name: String) -> String {
+        "\(name) is now your default"
+    }
 
     // Status
     static let offOnNetwork = "Off on this network"

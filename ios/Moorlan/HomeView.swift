@@ -7,6 +7,8 @@ struct HomeView: View {
 
     @State private var detailsServer: PairedServer?
     @State private var showRoutingInfo = false
+    @State private var toastText: String?
+    @State private var toastTask: Task<Void, Never>?
 
     private let cardShape = RoundedRectangle(cornerRadius: 16, style: .continuous)
 
@@ -28,10 +30,12 @@ struct HomeView: View {
                             name: server.displayName,
                             badge: status,
                             isDefault: isDefault,
+                            showDefaultStar: tunnel.servers.count > 1,
                             accent: leadingAccent(for: server, badge: status, isDefault: isDefault),
                             disabled: tunnel.isUnpairing,
                             shape: cardShape,
-                            onOpen: { detailsServer = server }
+                            onOpen: { detailsServer = server },
+                            onMakeDefault: { makeDefault(server) }
                         )
                     }
                 }
@@ -40,6 +44,22 @@ struct HomeView: View {
                 .padding(.bottom, 12)
             }
             .background(Color(.systemGroupedBackground))
+            .overlay(alignment: .bottom) {
+                if let toastText {
+                    Text(toastText)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        .background(.regularMaterial, in: Capsule(style: .continuous))
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 28)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .accessibilityAddTraits(.updatesFrequently)
+                }
+            }
+            .animation(.easeInOut(duration: 0.2), value: toastText)
             .navigationTitle(MoorlanCopy.tunnelsTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -58,6 +78,10 @@ struct HomeView: View {
                     .presentationDetents([.medium])
                     .presentationDragIndicator(.visible)
             }
+            .onDisappear {
+                toastTask?.cancel()
+                toastTask = nil
+            }
         }
     }
 
@@ -69,7 +93,7 @@ struct HomeView: View {
         server.id == tunnel.selectedServer?.id
     }
 
-    /// Status only — on-demand default is a card tint, not a pill.
+    /// Status only — on-demand default is a card tint + star, not a pill.
     private func statusBadge(for server: PairedServer) -> String? {
         guard isSelected(server) else { return nil }
         if tunnel.isOffOnCurrentPath { return MoorlanCopy.offHereBadge }
@@ -101,6 +125,25 @@ struct HomeView: View {
             return Color(.tertiaryLabel)
         default:
             return isDefault ? Color.accentColor : Color(.tertiaryLabel)
+        }
+    }
+
+    private func makeDefault(_ server: PairedServer) {
+        guard server.id != tunnel.onDemandActiveID else { return }
+        Task {
+            await tunnel.setOnDemandActive(server.id)
+            showToast(MoorlanCopy.madeDefaultToast(server.displayName))
+        }
+    }
+
+    private func showToast(_ text: String) {
+        toastTask?.cancel()
+        toastText = text
+        toastTask = Task {
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            toastText = nil
+            toastTask = nil
         }
     }
 }
@@ -185,15 +228,17 @@ private struct RoutingModeTiles: View {
     }
 }
 
-/// Tunnel card: tap opens details. On-demand default uses a tinted fill.
+/// Tunnel card: tap opens details. On-demand default uses a tinted fill + star.
 private struct TunnelCard: View {
     var name: String
     var badge: String?
     var isDefault: Bool
+    var showDefaultStar: Bool
     var accent: Color
     var disabled: Bool
     var shape: RoundedRectangle
     var onOpen: () -> Void
+    var onMakeDefault: () -> Void
 
     var body: some View {
         HStack(spacing: 0) {
@@ -203,24 +248,37 @@ private struct TunnelCard: View {
                 .frame(width: 4)
                 .accessibilityHidden(true)
 
-            TunnelRow(name: name, badge: badge)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 18)
+            Button(action: onOpen) {
+                TunnelRow(name: name, badge: badge)
+                    .padding(.leading, 16)
+                    .padding(.trailing, showDefaultStar ? 8 : 16)
+                    .padding(.vertical, 18)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(disabled)
+            .accessibilityLabel(name)
+            .accessibilityValue(accessibilityValue)
+            .accessibilityHint(MoorlanCopy.openTunnelDetailsA11y)
+
+            if showDefaultStar {
+                Button(action: onMakeDefault) {
+                    Image(systemName: isDefault ? "star.fill" : "star")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(isDefault ? Color.accentColor : Color(.tertiaryLabel))
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(disabled || isDefault)
+                .accessibilityLabel(isDefault ? MoorlanCopy.defaultStarA11y : MoorlanCopy.makeDefaultA11y)
+                .padding(.trailing, 8)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(cardFill, in: shape)
         .clipShape(shape)
-        .contentShape(shape)
-        .onTapGesture {
-            guard !disabled else { return }
-            onOpen()
-        }
-        .disabled(disabled)
-        .accessibilityElement(children: .ignore)
-        .accessibilityAddTraits(.isButton)
-        .accessibilityLabel(name)
-        .accessibilityValue(accessibilityValue)
-        .accessibilityHint(MoorlanCopy.openTunnelDetailsA11y)
     }
 
     private var cardFill: Color {

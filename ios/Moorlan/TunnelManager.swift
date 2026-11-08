@@ -20,8 +20,6 @@ final class TunnelManager: ObservableObject {
     @Published private(set) var selectedServerID: String?
     /// Tunnel that owns iOS on-demand auto-connect (at most one).
     @Published private(set) var onDemandActiveID: String?
-    /// After pair when another tunnel already exists — UI asks “Use as default?”
-    @Published var pendingDefaultPromptServerID: String?
     @Published var presentedError: UserFacingError?
     @Published private(set) var isUnpairing = false
     @Published private(set) var transferRates: String?
@@ -258,13 +256,8 @@ final class TunnelManager: ObservableObject {
         await applyUserRoutingChange(offSetChanged: false)
     }
 
-    func clearPendingDefaultPrompt() {
-        pendingDefaultPromptServerID = nil
-    }
-
-    /// Pair. Marks current Wi‑Fi Off. Returns whether UI should ask to make default.
-    @discardableResult
-    func pair(card: QRCard) async throws -> Bool {
+    /// Pair. Marks current Wi‑Fi Off. First/only tunnel becomes on-demand default.
+    func pair(card: QRCard) async throws {
         try Task.checkCancellation()
         try await LocalNetworkAuthorization.shared.ensureAccess(to: card.pairURL)
         try Task.checkCancellation()
@@ -287,32 +280,17 @@ final class TunnelManager: ObservableObject {
         await selectProfile(server.id)
         _ = try await configureProfile(server, enableOnDemand: false)
         writeAppGroupProfiles()
-        let askDefault: Bool
         if !hadOtherTunnels {
             await setOnDemandActive(server.id)
-            askDefault = false
-        } else {
-            askDefault = true
-            pendingDefaultPromptServerID = server.id
         }
         let offChanged = previousOff != policy.offNetworkIDs
         await applyUserRoutingChange(offSetChanged: offChanged)
-        return askDefault
-    }
-
-    func acceptPendingAsDefault() async {
-        guard let id = pendingDefaultPromptServerID else { return }
-        pendingDefaultPromptServerID = nil
-        await setOnDemandActive(id)
-    }
-
-    func declinePendingAsDefault() {
-        pendingDefaultPromptServerID = nil
     }
 
     /// Make this tunnel the sole on-demand-active profile.
     func setOnDemandActive(_ id: String) async {
         guard servers.contains(where: { $0.id == id }) else { return }
+        guard onDemandActiveID != id else { return }
         onDemandActiveID = id
         UserDefaults.standard.set(id, forKey: Self.onDemandActiveKey)
         let offNames = policy.offSSIDNames
@@ -420,9 +398,6 @@ final class TunnelManager: ObservableObject {
         if onDemandActiveID == server.id {
             onDemandActiveID = nil
             UserDefaults.standard.removeObject(forKey: Self.onDemandActiveKey)
-        }
-        if pendingDefaultPromptServerID == server.id {
-            pendingDefaultPromptServerID = nil
         }
         if selectedServer?.id == server.id {
             manager = nil

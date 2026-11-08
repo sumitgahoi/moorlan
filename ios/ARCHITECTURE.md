@@ -66,7 +66,8 @@ reads `unpair_token`.
 4. Mark current SSID **Off** when identifiable.
 5. Install `NETunnelProviderManager` for this server key.
 6. Write App Group `TunnelProfile` with token stripped.
-7. First/only tunnel → auto on-demand active; else ask to make default.
+7. First/only tunnel → auto on-demand active; additional tunnels keep the
+   existing default (user can change later via the star).
 8. Show the tunnel list home with the new tunnel selected.
 
 ### Policy (roaming)
