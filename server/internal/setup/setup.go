@@ -56,6 +56,9 @@ func Run(opts Options) error {
 		}
 		fmt.Fprintf(stderr, "moorlan: merged into %s\n", settings.Path)
 	}
+	if err := settings.Validate(merged); err != nil {
+		return fmt.Errorf("validate merged conf: %w", err)
+	}
 	if err := settings.Write(merged); err != nil {
 		return err
 	}
@@ -98,7 +101,11 @@ func printSummary(w io.Writer, site settings.Site) {
 	for _, name := range site.InterfaceNames() {
 		cfg := site.Interfaces[name]
 		fmt.Fprintf(w, "interfaces.%s:\n", name)
-		fmt.Fprintf(w, "  enabled: %v\n", cfg.Enabled)
+		enabled := false
+		if cfg.Enabled != nil {
+			enabled = *cfg.Enabled
+		}
+		fmt.Fprintf(w, "  enabled: %v\n", enabled)
 		fmt.Fprintf(w, "  name: %s\n", cfg.Name)
 		fmt.Fprintf(w, "  public-endpoint: %s\n", cfg.PublicEndpoint)
 		fmt.Fprintf(w, "  home-networks: %v\n", cfg.HomeNetworks)

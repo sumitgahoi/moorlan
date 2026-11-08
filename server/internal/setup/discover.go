@@ -92,10 +92,7 @@ func Discover(stun StunFunc) (settings.Site, []string, error) {
 		pubIP = ip
 	}
 
-	site := settings.Site{
-		PrivateEndpoint: privateEndpoint,
-		Interfaces:      map[string]settings.Interface{},
-	}
+	ifaces := map[string]settings.DefaultIface{}
 	for _, c := range candidates {
 		home := filterHomeNetworks(lanPrefixes, c.pool)
 		if len(home) == 0 {
@@ -116,8 +113,7 @@ func Discover(stun StunFunc) (settings.Site, []string, error) {
 		if err := payload.ValidateName(name); err != nil {
 			name = sanitizeName(c.name, "Home")
 		}
-		site.Interfaces[c.name] = settings.Interface{
-			Enabled:        false,
+		ifaces[c.name] = settings.DefaultIface{
 			Name:           name,
 			PublicEndpoint: pub,
 			HomeNetworks:   home,
@@ -125,7 +121,7 @@ func Discover(stun StunFunc) (settings.Site, []string, error) {
 			DNSSearch:      []string{"home.arpa"},
 		}
 	}
-	return site, notes, nil
+	return settings.CreateDefaultConf(privateEndpoint, ifaces), notes, nil
 }
 
 func interfaceAddresses(name string) ([]string, int, error) {

@@ -88,6 +88,9 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	if err := settings.Validate(site); err != nil {
+		return err
+	}
 	storePath := runtime.DefaultStorePath
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -121,7 +124,7 @@ func run() error {
 		if !ok {
 			return fmt.Errorf("interface %s is not listed in %s", name, settings.Path)
 		}
-		if !cfg.Enabled {
+		if cfg.Enabled == nil || !*cfg.Enabled {
 			return fmt.Errorf("interface %s has enabled: false; set enabled: true in %s or run: sudo moorlan --setup", name, settings.Path)
 		}
 		host, err = runtime.Discover(name, storePath, site.PrivateEndpoint, cfg.HomeNetworks, cfg.PublicEndpoint, cfg.DNSServers, cfg.DNSSearch, cfg.Name)
@@ -218,10 +221,11 @@ func resolveSessionInterface(site settings.Site, storePath, ifaceFlag string, un
 	enabledNames := site.EnabledInterfaceNames()
 	if ifaceFlag != "" {
 		if cfg, ok := site.Lookup(ifaceFlag); ok {
-			if !unpairOnly && !cfg.Enabled {
+			enabled := cfg.Enabled != nil && *cfg.Enabled
+			if !unpairOnly && !enabled {
 				return "", fmt.Errorf("interface %s has enabled: false; set enabled: true in %s", ifaceFlag, settings.Path)
 			}
-			if cfg.Enabled || unpairOnly {
+			if enabled || unpairOnly {
 				return ifaceFlag, nil
 			}
 		}

@@ -146,17 +146,32 @@ There is no `--add-interface` or `--remove-interface`.
 - `--setup` does not download a binary. From source: install binary to path, then
   `moorlan --setup`.
 
-### `--setup` merge
+### `--setup` merge (normative)
 
-- Guessed site: all up WireGuard devices with exactly one private IPv4
-  (`/16`–`/30`); `enabled: false`; STUN (or fallback) for `public-endpoint`;
-  LAN prefixes for `home-networks`; WG address for `dns-servers`;
-  `dns-search: [home.arpa]`; shared `private-endpoint` from first suitable LAN IP
-  + port `8756`.
-- If YAML missing → write guessed. If present → must validate, then merge:
-  existing non-empty strings/lists and existing `enabled` win; new guessed ifaces
-  added; stanzas only in existing YAML kept (stderr note if not seen on host).
-- Atomic write (temp + rename).
+`--setup` builds site conf in four steps. `Load` / `Parse` only decode (never
+validate). `Validate` is a separate step and requires every site key to be
+**explicitly set** (omit ≠ assumed default; omitted `enabled` is unset, not
+false). Unknown YAML keys are ignored and dropped on rewrite.
+
+1. **Best-effort (guessed) site** from the live host (`CreateDefaultConf`):
+   - Every up WireGuard device with exactly one private IPv4 (`/16`–`/30`)
+   - Each guessed iface: `enabled: false` set explicitly; `name` from hostname
+     (or `hostname-iface`); `public-endpoint` via STUN (or global-IPv4 +
+     listen-port fallback); `home-networks` from private non-WG prefixes
+     (exclude tunnel pool; include private-endpoint’s prefix); `dns-servers` =
+     that iface’s WG IPv4; `dns-search: [home.arpa]`
+   - Root `private-endpoint`: first suitable LAN IPv4 + port `8756`
+2. **Load** the on-disk file if present (decode only; missing file → guessed
+   only). Omitted keys stay unset.
+3. **Merge**: start from the guessed site; for each field, if the existing
+   value is set (non-empty string/list, or `enabled` present), keep the
+   existing value; otherwise keep the guess. Interface names only in guessed →
+   add guessed stanza (`enabled: false`). Interface names only in existing →
+   keep (may note “not seen on host”).
+4. **Validate** the merged site (all required keys explicitly set), then
+   atomic write (temp + rename). Write always emits every site key.
+
+Day-to-day modes (`--pair`, `--reconcile`, …): `Load` then `Validate`.
 
 ## 7. Pair / unpair protocol
 

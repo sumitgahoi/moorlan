@@ -56,7 +56,7 @@ runtime → iface, pair (Lease types), payload, wgctrl, SQLite
 | --- | --- |
 | [`cmd/moorlan`](cmd/moorlan/main.go) | Mode dispatch, root check, iface flock, pair/unpair lifecycle |
 | [`internal/setup`](internal/setup) | `--setup`: unit install, DB migrate, discover/merge YAML |
-| [`internal/settings`](internal/settings) | Load/validate/write/merge site YAML |
+| [`internal/settings`](internal/settings) | Site YAML pipeline: Parse/Load → CreateDefaultConf → Merge → Validate → Write |
 | [`internal/runtime`](internal/runtime) | Host+device; SQLite; Assign / Remove / Reconcile / List |
 | [`internal/iface`](internal/iface) | Tunnel pool + `/32` allocation |
 | [`internal/pair`](internal/pair) | HTTP `/v1/pair`, idle timer, `Lease` |
@@ -130,3 +130,16 @@ See REQUIREMENTS §9. In particular: no peer file writes into host network
 managers, no continuous pair daemon, no CLI overrides of site conf keys, no
 UPnP/relays, no interface registration CLI, no ensureHost on every day-to-day
 command.
+
+## 8. Code style
+
+Prefer **functional**, **pipeline-able** code over monoliths:
+
+- Small functions with a single clear job; compose them into a named sequence
+  (e.g. settings: Parse/Load → CreateDefaultConf → Merge → Validate → Write).
+- One file per pipeline step when the flow is first-class, with matching
+  `*_test.go` so each step is unit-testable without reading the others.
+- Load/decode must not hide validate; side effects (I/O, defaults) stay out of
+  pure steps unless that is the step’s job.
+- Avoid god-files and dual APIs that exist only to dodge a step that should be
+  separate (e.g. “strict Load” vs “lenient LoadForMerge”).

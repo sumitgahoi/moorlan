@@ -39,18 +39,12 @@ func TestSettingsMergeEmptyGuess(t *testing.T) {
 		PrivateEndpoint: "10.0.0.1:8756",
 		Interfaces:      map[string]settings.Interface{},
 	}
-	guessed := settings.Site{
-		PrivateEndpoint: "10.0.0.2:8756",
-		Interfaces: map[string]settings.Interface{
-			"wg0": {
-				Enabled:        false,
-				Name:           "Home",
-				PublicEndpoint: "1.1.1.1:51820",
-				HomeNetworks:   []string{"10.0.0.0/24"},
-				DNSServers:     []string{"10.8.0.1"},
-			},
+	guessed := settings.CreateDefaultConf("10.0.0.2:8756", map[string]settings.DefaultIface{
+		"wg0": {
+			Name: "Home", PublicEndpoint: "1.1.1.1:51820",
+			HomeNetworks: []string{"10.0.0.0/24"}, DNSServers: []string{"10.8.0.1"},
 		},
-	}
+	})
 	merged, _ := settings.Merge(existing, guessed)
 	if merged.PrivateEndpoint != "10.0.0.1:8756" {
 		t.Fatal(merged.PrivateEndpoint)
