@@ -28,14 +28,14 @@ flowchart LR
   ext[Packet Tunnel] --> appGroup
   ext --> keychain
   ext -->|WireGuardKit| wg[WireGuard]
-  path[Path + SSID] --> app
-  path --> ext
+  path[Path + SSID] --> ext
+  path -.->|UI identity only| app
 ```
 
 | Owner | Responsibility |
 | --- | --- |
 | Server lease | `tunnel_network`, `home_networks`, `dns_servers`, `dns_search`, `name`, endpoint, address, keys, token |
-| App storage | Host records (full lease including `unpair_token`), selection, on-demand-active id, permanent routing map |
+| App storage | Host records (full lease including `unpair_token`), selection, on-demand-active id, durable routing map |
 | App Group | Extension profile per host — no private key, no `unpair_token` |
 | Keychain | One long-lived client WireGuard private key |
 | System VPN | Per-host `NETunnelProviderManager` |
@@ -45,9 +45,9 @@ flowchart LR
 
 | Target / area | Owns |
 | --- | --- |
-| `Moorlan` app | SwiftUI (Home, Settings, Scanner fallback), `onOpenURL` for `moorlan://`, `TunnelManager`, permissions UX, tunnel list / default |
+| `Moorlan` app | SwiftUI (Home, Scanner), `onOpenURL` for `moorlan://`, `TunnelManager`, permissions UX, tunnel list / default |
 | `MoorlanCore` | Lease, QR / `ScannedCode`, `PairingClient`, `TunnelPolicy`, `ServerStore`, `IdentityStore`, path/SSID helpers, errors |
-| `PacketTunnel` | `NE` provider; load App Group profile; apply permanent policy; WireGuardKit start/update/stop |
+| `PacketTunnel` | `NE` provider; load App Group profile; apply durable policy; WireGuardKit start/update/stop |
 | `Shared` | `AppIdentity`, `WireGuardProfileBuilder` |
 | `Vendor/wireguard-apple` | Vendored WireGuardKit |
 
@@ -63,7 +63,7 @@ reads `unpair_token`.
    home Wi‑Fi → reach control `url` on the LAN.
 2. `POST /v1/pair` with client public key + device label.
 3. Persist host + full lease (including `unpair_token`) in app storage.
-4. Mark current SSID permanently **Off** when identifiable.
+4. Mark current SSID **Off** when identifiable.
 5. Install `NETunnelProviderManager` for this server key.
 6. Write App Group `TunnelProfile` with token stripped.
 7. First/only tunnel → auto on-demand active; else ask to make default.
@@ -71,22 +71,24 @@ reads `unpair_token`.
 
 ### Policy (roaming)
 
-1. Observe network path + Apple Wi‑Fi identity (SSID). Unsettled → **Full**.
-   Stable (named Wi‑Fi or cellular-only) → real path policy if it differs. If
-   never stable, remain Full. Missing SSID is not an error.
-2. **Effective** routing (app): temporary Home override for current path, else
-   permanent map (Wi‑Fi default Full; cellular default Split).
-3. Extension / on-demand: **permanent** map only. On-demand Disconnect/Connect
-   rules are the system-native evaluator for Off SSIDs.
-4. Off → disconnect; Split → subnet AllowedIPs; Full → plus `0.0.0.0/0` (never
+1. Extension observes network path + Apple Wi‑Fi identity (SSID). Unsettled →
+   **Full**. Stable (named Wi‑Fi or cellular-only) → durable path policy if it
+   differs. If never stable, remain Full. Missing SSID is not an error.
+2. One durable map (Wi‑Fi default Full; cellular default Full). Edited from the
+   tunnel-list menu on the current path; persists to app storage + App Group.
+3. App launch / foreground: observe system VPN status only — do not re-save
+   preferences or restart the tunnel. User policy edits, pair/unpair, and
+   “Use as default” are the only app-driven VPN mutations.
+4. On-demand Disconnect/Connect rules evaluate Off SSIDs. Update those rules
+   only when the Off set changes.
+5. Off → disconnect; Split → subnet AllowedIPs; Full → plus `0.0.0.0/0` (never
    `::/0`). DNS host routes required because WireGuardKit sends all queries to
    lease DNS.
-5. On-demand only on the on-demand-active manager when ≥1 permanent Off SSID
-   exists.
+6. On-demand only on the on-demand-active manager when ≥1 Off SSID exists.
 
 ### Unpair
 
-1. Confirm; require Off Wi‑Fi when permanent Off SSIDs are configured.
+1. Confirm; require Off Wi‑Fi when Off SSIDs are configured.
 2. Scan unpair QR → match host by `server_public_key`.
 3. `DELETE /v1/pair` with peer key + app-stored `unpair_token`.
 4. On **204** only: remove that host’s VPN profile, App Group blob, and app
@@ -103,7 +105,7 @@ error (title + sentence + Retry). Only one VPN can be active at a time.
 | Store | Content |
 | --- | --- |
 | App storage | Paired hosts: card, full lease (`unpair_token` included), selected id, on-demand-active id, label |
-| App storage | Permanent `networkRouting` + `cellularRouting` |
+| App storage | Durable `networkRouting` + `cellularRouting` |
 | App Group `group.app.moorlan` | `TunnelProfile` per host for the extension — strip `unpair_token`; no private key |
 | Keychain shared group | Client WireGuard private key (`AfterFirstUnlockThisDeviceOnly`) |
 | System | One `NETunnelProviderManager` per server public key |
@@ -112,10 +114,10 @@ error (title + sentence + Retry). Only one VPN can be active at a time.
 
 - HIG-native SwiftUI (`NavigationStack`, inset grouped lists/forms, SF Symbols).
   See [REQUIREMENTS.md](REQUIREMENTS.md) §8.
-- Home: quiet tunnel list (name + status pill); tap opens details. Temporary
-  Off/Split/Full via card menu; Settings keeps permanent routing. No prototype
-  theme switcher / power button / connection diagram.
-- Settings: permanent cellular + Wi‑Fi routing.
+- Tunnel list: quiet list (name + status pill); tap opens details. Durable
+  Off/Split/Full via prominent Home path control + About Routing info sheet.
+  Camera scans pair/unpair QR. No Settings screen; no prototype theme switcher /
+  power button / connection diagram.
 - Errors: title + one sentence + action. No raw NE / URL error strings in UI.
 - Accessibility: Dynamic Type, VoiceOver, Reduce Motion.
 

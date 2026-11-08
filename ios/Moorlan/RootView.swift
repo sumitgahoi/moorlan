@@ -7,27 +7,24 @@ struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var showScanner = false
     @State private var invitePayload: String?
-    @State private var showSettings = false
 
     var body: some View {
         Group {
             if tunnel.servers.isEmpty {
                 EmptyPairingView(onScan: { openInAppScanner() })
             } else {
-                HomeView(
-                    onScan: { openInAppScanner() },
-                    onSettings: { showSettings = true }
-                )
+                HomeView(onScan: { openInAppScanner() })
             }
         }
         .onOpenURL(perform: handleOpenURL)
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { Task { await tunnel.applyDesiredState() } }
+            // Observe only — do not rewrite VPN prefs or bounce the tunnel.
+            if phase == .active { Task { await tunnel.attachToSystemVPN() } }
         }
         .alert(
             tunnel.presentedError?.title ?? "Moorlan",
             isPresented: Binding(
-                get: { tunnel.presentedError != nil && !showScanner && !showSettings },
+                get: { tunnel.presentedError != nil && !showScanner },
                 set: { if !$0 { tunnel.clearPresentedError() } }
             ),
             presenting: tunnel.presentedError
@@ -53,7 +50,6 @@ struct RootView: View {
                 get: {
                     tunnel.pendingDefaultPromptServerID != nil
                         && !showScanner
-                        && !showSettings
                         && tunnel.presentedError == nil
                 },
                 set: { if !$0 { tunnel.declinePendingAsDefault() } }
@@ -70,10 +66,6 @@ struct RootView: View {
         }
         .sheet(isPresented: $showScanner, onDismiss: { invitePayload = nil }) {
             ScannerSheet(initialPayload: invitePayload)
-                .environmentObject(tunnel)
-        }
-        .sheet(isPresented: $showSettings) {
-            SettingsView()
                 .environmentObject(tunnel)
         }
     }

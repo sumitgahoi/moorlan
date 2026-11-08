@@ -41,7 +41,7 @@ Authoritative product contract for the iPhone / iPad app and Packet Tunnel
 | Owner | Owns | Does not own |
 | --- | --- | --- |
 | Server lease | `tunnel_network`, `home_networks`, `dns_servers`, `dns_search`, `endpoint`, `address`, server `public_key`, `unpair_token`, lease `mtu` / `persistent_keepalive` | Phone SSIDs, routing, which tunnel is on-demand active |
-| Phone | Multi-tunnel list, selected tunnel, on-demand-active tunnel, per-network Off/Split/Full (permanent + temporary), cellular routing, device label | Lease identity fields; DNS/search policy |
+| Phone | Multi-tunnel list, selected tunnel, on-demand-active tunnel, durable per-network Off/Split/Full (including cellular), device label | Lease identity fields; DNS/search policy |
 | Linux host | Forwarding / NAT for exit | iOS permissions / on-demand |
 
 Phone MUST NOT override lease DNS/search, invent resolvers (including Cloudflare
@@ -78,23 +78,26 @@ Each named Wi‑Fi and cellular has a routing policy:
 | **Split** | Only home routes / DNS through the tunnel |
 | **Full** | All traffic through home (`0.0.0.0/0` only; never `::/0`) |
 
-- **Permanent default:** unmarked Wi‑Fi → **Full**; cellular → **Split**.
-- **Home** picker changes are **temporary** (until the path/SSID changes).
-- **Settings** changes are **permanent**.
-- **Pair** on an identifiable Wi‑Fi → that SSID is **permanently Off**.
-- Multiple SSIDs may be permanently Off.
+- **Default:** unmarked Wi‑Fi → **Full**; cellular → **Full**.
+- **Edit:** tunnel-list menu while on that path. Change **persists** and applies
+  once (App Group + tunnel update). Next visit to that network uses the saved
+  policy. No separate Settings routing list; no temporary overlay.
+- **Pair** on an identifiable Wi‑Fi → that SSID is marked **Off**.
+- Multiple SSIDs may be Off.
 - No join prompt for new Wi‑Fi. No separate power button or Exit Node toggle —
   Off / Split / Full is the path control.
-- On network switch / unsettled path: apply **Full** until stable. Stable =
-  named Wi‑Fi or cellular-only. Then apply that path’s Off / Split / Full only
-  if it differs. If never stable (e.g. Wi‑Fi with no SSID forever), remain Full.
-  Missing SSID is not an error.
-- Policy MUST run in the app **and** the Packet Tunnel extension on **stable**
-  path changes. Extension and on-demand use the **permanent** map only.
-- On-demand: when the default tunnel has ≥1 permanent Off SSID → Disconnect on
-  those SSIDs / Connect elsewhere; with zero Off SSIDs, disable on-demand (avoid
+- On network switch / unsettled path: extension applies **Full** until stable.
+  Stable = named Wi‑Fi or cellular-only. Then apply that path’s Off / Split /
+  Full only if it differs. If never stable (e.g. Wi‑Fi with no SSID forever),
+  remain Full. Missing SSID is not an error.
+- **Packet Tunnel** applies durable policy on stable path changes while the app
+  is suspended or killed. **App** launch / foreground MUST observe VPN status
+  only — MUST NOT rewrite VPN preferences or bounce the tunnel unless the user
+  changes policy, pairs, unpairs, or sets the on-demand default.
+- On-demand: when the default tunnel has ≥1 Off SSID → Disconnect on those
+  SSIDs / Connect elsewhere; with zero Off SSIDs, disable on-demand (avoid
   reconnect loops). On-demand is the system-native connect/disconnect path for
-  Off SSIDs.
+  Off SSIDs. Update on-demand rules only when the Off SSID set changes.
 
 ### AllowedIPs and DNS
 
@@ -123,7 +126,7 @@ Protocol MUST match [server/REQUIREMENTS.md](../server/REQUIREMENTS.md) §7.
   rename locally afterward; a local rename overrides `name` until
   cleared.
 - Persist lease; install VPN profile. On success: confirmation, then status home
-  with the new tunnel. **MUST** mark current SSID permanently Off when
+  with the new tunnel. **MUST** mark current SSID Off when
   identifiable. Then apply on-demand default rules in §4.
 - Pair progress: Open invite → Reach server → Save VPN profile (cancellable).
 
@@ -131,7 +134,7 @@ Protocol MUST match [server/REQUIREMENTS.md](../server/REQUIREMENTS.md) §7.
 
 - QR v1: `moorlan://v1/unpair?url=…&spk=…`. Token NOT in QR.
 - Match saved host by `spk`. Prefer scanned control `url`.
-- If any permanent Off SSIDs exist, require the phone on one of them.
+- If any Off SSIDs exist, require the phone on one of them.
 - `DELETE` with peer `public_key` + stored `unpair_token`. Success is **HTTP 204
   only**, then remove that host’s VPN profile and local host record.
 - Confirm destructive unpair naming the host. On failure, keep local state for
@@ -142,7 +145,7 @@ Protocol MUST match [server/REQUIREMENTS.md](../server/REQUIREMENTS.md) §7.
 | Store | Content |
 | --- | --- |
 | App storage (host records) | Paired hosts: QR card, **full lease including `unpair_token`**, selection, on-demand-active id, label |
-| App storage (policy) | Permanent `networkRouting` + `cellularRouting` |
+| App storage (policy) | Durable `networkRouting` + `cellularRouting` |
 | App Group (`group.app.moorlan`) | Non-secret extension `TunnelProfile` per host — **strip `unpair_token`**; **no** private key |
 | Keychain (shared group) | One long-lived client WireGuard private key (`AfterFirstUnlockThisDeviceOnly`); survives unpair of a single host |
 | System | Per-host `NETunnelProviderManager` |
@@ -166,9 +169,11 @@ routing is in-memory only.
   standard margins, native `Toggle` / `Form` / `List` / toolbars /
   `NavigationStack`, 44pt minimum hit targets. Do not invent a parallel type
   scale or hard-code a light-only palette that breaks Dark Mode.
-- Home: Off/Split/Full segmented control for the current path; tunnel list with
-  Default badge / Use as default; status text. No power button; no Exit Node toggle.
-- Settings: permanent cellular + Wi‑Fi routing lists.
+- Home: prominent Off/Split/Full path control for the current network (durable)
+  with About Routing info sheet; status pill (Off / Connected / …) on the
+  selected tunnel; on-demand default marked by card tint (not a pill). Tap a
+  tunnel for details. Camera toolbar scans pair/unpair QR. No Settings screen;
+  no power button; no Exit Node toggle.
 - **Connected** means a live WireGuard handshake with the paired peer (UAPI
   `last_handshake_time_sec` fresh), not merely `NEVPNStatus.connected`.
 - Empty state: invite to pair + primary scan CTA.
@@ -196,8 +201,7 @@ acknowledged. Missing Wi‑Fi name is **not** a user-facing error.
 - Protocol versions other than v1; proving Internet reachability after pair
 - Configuring the home router / CGNAT
 - Shipping a Mac app in this tree (planned separately)
-- Temporary-vs-save affordance beyond Home=temp / Settings=permanent (no “Save
-  for this network” button required in v1)
+- Pre-configuring routing for a network you are not on
 
 ## 10. Failure and recovery
 

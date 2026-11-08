@@ -46,8 +46,8 @@ In-app scan is a fallback if Camera did not open the app. See
 
 ## Day to day
 
-- **Off / Split / Full** on Home is temporary for the current network. Change
-  permanently in Settings.
+- **Off / Split / Full** from the tunnel-list menu on the current network —
+  saved for next time. App launch only shows status (does not bounce the VPN).
 - **Default** tunnel (at most one) auto-connects when away from Off Wi‑Fi. After
   pairing a second house, the app asks whether to make it the default.
 - **Unpair:** on the server run `sudo moorlan --unpair --interface wg0`; in the
@@ -59,7 +59,7 @@ In-app scan is a fallback if Camera did not open the app. See
 | Network | Permanent default |
 | --- | --- |
 | Unmarked Wi‑Fi | Full |
-| Cellular | Split |
+| Cellular | Full |
 | Wi‑Fi at pair time | Off (saved) |
 
 DNS comes from the server lease only. Full matrix and UX rules:
@@ -70,7 +70,7 @@ DNS comes from the server lease only. Full matrix and UX rules:
 | Store | Holds |
 | --- | --- |
 | App host record | Lease including `unpair_token` |
-| App policy | Permanent Off/Split/Full map |
+| App policy | Durable Off/Split/Full map |
 | App Group | Extension profile — **no** token, **no** private key |
 | Keychain | One client WireGuard private key |
 | System | Per-host `NETunnelProviderManager` |

@@ -18,10 +18,10 @@
 		4DAEF986F2EBC00F9FEAFB66 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F6241D5FB94DB4189AF8A3A /* RootView.swift */; };
 		51DF22839D24399C982B6E4B /* AppIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = C80F8D0E668C80CB47D6F320 /* AppIdentity.swift */; };
 		77BCFF44F884CA4CC6F3270C /* MoorlanCopy.swift in Sources */ = {isa = PBXBuildFile; fileRef = E93AB2A2B83CDEC6732E2399 /* MoorlanCopy.swift */; };
-		79AC1D8E8008A537F9437017 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E00EF2632F4EEEEA70010AEF /* SettingsView.swift */; };
 		8060BFE4C866E9EAA06871E9 /* MoorlanCore in Frameworks */ = {isa = PBXBuildFile; productRef = 4F1B3E68D6F90EBA4768D7F1 /* MoorlanCore */; };
 		8B2DE4BE275F71079CA00DFF /* LocalNetworkAuthorization.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9490B66EE95FE4F7CA598AA4 /* LocalNetworkAuthorization.swift */; };
 		8CA4E20467690C4773C0BF54 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDD9E60C864FCFC32AD9FE47 /* HomeView.swift */; };
+		7F1A2B3C4D5E6F708192A3B4 /* RoutingPolicyInfoSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E5D4C3B2A190817F6E5D4C3 /* RoutingPolicyInfoSheet.swift */; };
 		8CE219DCEB2CB92AA2AF9046 /* TunnelManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4873F05F0A090D4EDD8313EB /* TunnelManager.swift */; };
 		CBC7B93110C12B4BD006D8B6 /* AppIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = C80F8D0E668C80CB47D6F320 /* AppIdentity.swift */; };
 		CBCB43E779FCAB8D69CDDF2F /* PacketTunnel.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 94FD78BE59569680E3923D50 /* PacketTunnel.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -81,9 +81,9 @@
 		C80F8D0E668C80CB47D6F320 /* AppIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIdentity.swift; sourceTree = "<group>"; };
 		CAE55EF2ED41A8CAB35AE3B4 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		CB446A3098F4BCC33D53B8EF /* MoorlanCore */ = {isa = PBXFileReference; lastKnownFileType = folder; path = MoorlanCore; sourceTree = SOURCE_ROOT; };
+		6E5D4C3B2A190817F6E5D4C3 /* RoutingPolicyInfoSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutingPolicyInfoSheet.swift; sourceTree = "<group>"; };
 		DDD9E60C864FCFC32AD9FE47 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		DFAEA05CC56709EDEBE419B0 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		E00EF2632F4EEEEA70010AEF /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		E93AB2A2B83CDEC6732E2399 /* MoorlanCopy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoorlanCopy.swift; sourceTree = "<group>"; };
 		FB4FA0606C1213E683370B7A /* WiFiIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WiFiIdentity.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -127,12 +127,12 @@
 				56856E25F169EAC01DFBE7E1 /* EmptyPairingView.swift */,
 				DDD9E60C864FCFC32AD9FE47 /* HomeView.swift */,
 				CAE55EF2ED41A8CAB35AE3B4 /* Info.plist */,
+				6E5D4C3B2A190817F6E5D4C3 /* RoutingPolicyInfoSheet.swift */,
 				9490B66EE95FE4F7CA598AA4 /* LocalNetworkAuthorization.swift */,
 				C78FB1B62ACA07DB85F22C0A /* Moorlan.entitlements */,
 				059A0BCEE175CFDB16E228D2 /* MoorlanApp.swift */,
 				9F6241D5FB94DB4189AF8A3A /* RootView.swift */,
 				927E98A1CB2BAD5029341EA4 /* ScannerSheet.swift */,
-				E00EF2632F4EEEEA70010AEF /* SettingsView.swift */,
 				4466F87A609FD4E9A2D97863 /* TunnelDetailsSheet.swift */,
 				4873F05F0A090D4EDD8313EB /* TunnelManager.swift */,
 				FB4FA0606C1213E683370B7A /* WiFiIdentity.swift */,
@@ -320,11 +320,11 @@
 				464523A4552483DCADE253A5 /* EmptyPairingView.swift in Sources */,
 				8CA4E20467690C4773C0BF54 /* HomeView.swift in Sources */,
 				8B2DE4BE275F71079CA00DFF /* LocalNetworkAuthorization.swift in Sources */,
+				7F1A2B3C4D5E6F708192A3B4 /* RoutingPolicyInfoSheet.swift in Sources */,
 				0AF475AC7D1E66819BB6DCC9 /* MoorlanApp.swift in Sources */,
 				77BCFF44F884CA4CC6F3270C /* MoorlanCopy.swift in Sources */,
 				4DAEF986F2EBC00F9FEAFB66 /* RootView.swift in Sources */,
 				0D6E17339DC919FA9655CD1F /* ScannerSheet.swift in Sources */,
-				79AC1D8E8008A537F9437017 /* SettingsView.swift in Sources */,
 				E3EB2846EB6F1DF3204FC521 /* TunnelDetailsSheet.swift in Sources */,
 				8CE219DCEB2CB92AA2AF9046 /* TunnelManager.swift in Sources */,
 				11909FA21FDC257F18198468 /* WiFiIdentity.swift in Sources */,

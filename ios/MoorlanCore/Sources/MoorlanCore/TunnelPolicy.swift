@@ -1,6 +1,6 @@
 import Foundation
 
-/// Per-network tunnel behavior. Unmarked Wi‑Fi defaults to full; cellular defaults to split.
+/// Per-network tunnel behavior. Unmarked Wi‑Fi and cellular default to full.
 public enum NetworkRouting: String, Codable, CaseIterable, Sendable {
     case off
     case split
@@ -9,16 +9,16 @@ public enum NetworkRouting: String, Codable, CaseIterable, Sendable {
 
 /// Phone-owned routing map. Server lease owns identity and DNS; this owns Off/Split/Full.
 public struct TunnelPolicy: Equatable, Codable, Sendable {
-    /// Permanent Wi‑Fi map keyed by `ssid:Name`. Missing key → `.full`.
+    /// Durable Wi‑Fi map keyed by `ssid:Name`. Missing key → `.full`.
     public var networkRouting: [String: NetworkRouting]
-    /// Permanent cellular routing. Default `.split`.
+    /// Durable cellular routing. Default `.full`.
     public var cellularRouting: NetworkRouting
     /// TEMP debug only: when non-empty, replaces lease `dns_servers` for the tunnel.
     public var dnsOverride: [String]?
 
     public init(
         networkRouting: [String: NetworkRouting] = [:],
-        cellularRouting: NetworkRouting = .split,
+        cellularRouting: NetworkRouting = .full,
         dnsOverride: [String]? = nil
     ) {
         self.networkRouting = networkRouting
@@ -32,7 +32,7 @@ public struct TunnelPolicy: Equatable, Codable, Sendable {
             networkRouting = try c.decodeIfPresent([String: NetworkRouting].self, forKey: .networkRouting) ?? [:]
             // Drop non-ssid keys from legacy blobs.
             networkRouting = networkRouting.filter { $0.key.hasPrefix("ssid:") }
-            cellularRouting = try c.decodeIfPresent(NetworkRouting.self, forKey: .cellularRouting) ?? .split
+            cellularRouting = try c.decodeIfPresent(NetworkRouting.self, forKey: .cellularRouting) ?? .full
             dnsOverride = try c.decodeIfPresent([String].self, forKey: .dnsOverride)
             return
         }
@@ -101,50 +101,43 @@ public struct TunnelPolicy: Equatable, Codable, Sendable {
         case connect(fullTunnel: Bool)
     }
 
-    /// Permanent routing for a named Wi‑Fi id (`ssid:…`). Missing → Full.
-    public func permanentRouting(forNetworkID id: String) -> NetworkRouting {
+    /// Durable routing for a named Wi‑Fi id (`ssid:…`). Missing → Full.
+    public func routing(forNetworkID id: String) -> NetworkRouting {
         networkRouting[id] ?? .full
     }
 
-    /// SSIDs permanently marked Off (drive on-demand Disconnect rules).
-    public var permanentOffNetworkIDs: Set<String> {
+    /// SSIDs marked Off (drive on-demand Disconnect rules).
+    public var offNetworkIDs: Set<String> {
         Set(networkRouting.compactMap { $0.value == .off ? $0.key : nil })
     }
 
-    public var permanentOffSSIDNames: [String] {
-        permanentOffNetworkIDs.compactMap(Self.ssidName(from:)).sorted()
+    public var offSSIDNames: [String] {
+        offNetworkIDs.compactMap(Self.ssidName(from:)).sorted()
     }
 
-    /// Decide using the permanent map only (extension + on-demand).
+    /// Decide using the durable map (extension + on-demand + app).
     public func decide(path: PathKind) -> Decision {
-        decide(path: path, override: nil)
-    }
-
-    /// Decide with an optional temporary override for the current path.
-    ///
-    /// Callers must not invoke this for transitional / unknown-SSID moments —
-    /// they keep the last applied decision. A non-`ssid:` Wi‑Fi id is treated
-    /// like unmarked Wi‑Fi (Full), never as a user-facing error.
-    public func decide(path: PathKind, override: NetworkRouting?) -> Decision {
         if case .wifi(let id) = path {
             if PathIdentity.isKnownSSID(id) {
-                let routing = override ?? permanentRouting(forNetworkID: id)
-                return decision(for: routing, offReason: "Off on this network")
+                return decision(for: routing(forNetworkID: id), offReason: "Off on this network")
             }
             // Unknown name: same as unmarked Wi‑Fi default (Full), not an error.
-            let routing = override ?? .full
-            return decision(for: routing, offReason: "Off on this network")
+            return decision(for: .full, offReason: "Off on this network")
         }
         switch path {
         case .cellular:
-            let routing = override ?? cellularRouting
-            return decision(for: routing, offReason: "Off on cellular")
+            return decision(for: cellularRouting, offReason: "Off on cellular")
         case .other:
             return .connect(fullTunnel: true)
         case .wifi:
             return .connect(fullTunnel: true)
         }
     }
+
+    /// Legacy aliases — prefer `routing` / `offNetworkIDs` / `offSSIDNames`.
+    public func permanentRouting(forNetworkID id: String) -> NetworkRouting { routing(forNetworkID: id) }
+    public var permanentOffNetworkIDs: Set<String> { offNetworkIDs }
+    public var permanentOffSSIDNames: [String] { offSSIDNames }
 
     private func decision(for routing: NetworkRouting, offReason: String) -> Decision {
         switch routing {
@@ -197,7 +190,7 @@ public struct TunnelPolicy: Equatable, Codable, Sendable {
         return name.isEmpty ? nil : name
     }
 
-    /// Merge former per-server home SSIDs into permanent Off.
+    /// Merge former per-server home SSIDs into Off.
     public mutating func applyLegacyHomeSSIDs(_ ids: Set<String>) {
         for id in ids where id.hasPrefix("ssid:") {
             networkRouting[id] = .off

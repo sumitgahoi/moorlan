@@ -3,18 +3,39 @@ import MoorlanCore
 
 struct TunnelDetailsSheet: View {
     var server: PairedServer
+    @EnvironmentObject private var tunnel: TunnelManager
     @Environment(\.dismiss) private var dismiss
+
+    private var isOnDemandDefault: Bool {
+        server.id == tunnel.onDemandActiveID
+    }
 
     var body: some View {
         NavigationStack {
             List {
+                if isOnDemandDefault {
+                    Section {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label(MoorlanCopy.onDemandDefaultTitle, systemImage: "star.fill")
+                                .font(.headline)
+                                .foregroundStyle(Color.accentColor)
+                            Text(MoorlanCopy.onDemandDefaultBody)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(.vertical, 4)
+                        .accessibilityElement(children: .combine)
+                    }
+                }
+
                 Section {
                     LabeledContent("Name", value: server.displayName)
                     LabeledContent(MoorlanCopy.detailsAddress, value: server.lease.address)
                     LabeledContent(MoorlanCopy.detailsEndpoint, value: server.lease.endpoint ?? "—")
                     LabeledContent(MoorlanCopy.detailsTunnel, value: server.lease.tunnelNetwork)
 
-                    LabeledContent(MoorlanCopy.detailsHomeNets) {
+                    LabeledContent(MoorlanCopy.detailsPrivateNets) {
                         multiLineValue(server.lease.homeNetworks)
                     }
                     LabeledContent(MoorlanCopy.detailsDNS) {

@@ -9,7 +9,7 @@ public enum LANReachability {
 
     public static func unreachableMessage(for url: URL) -> String {
         let endpoint = endpointDescription(for: url)
-        return "Cannot reach \(endpoint). Join home Wi‑Fi, allow Local Network for Moorlan in Settings, and keep the Moorlan host in pair mode on that address."
+        return "Cannot reach \(endpoint). Join Wi‑Fi near the host, allow Local Network for Moorlan in Settings, and keep the Moorlan host in pair mode on that address."
     }
 
     /// Maps transport failures to a clear LAN message; leaves other errors unchanged.

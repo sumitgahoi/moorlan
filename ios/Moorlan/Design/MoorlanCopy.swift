@@ -1,11 +1,14 @@
 import Foundation
 import MoorlanCore
 
-/// Plain household English for Off / Split / Full.
+/// Plain English for Off / Split / Full and shared UI strings.
 enum MoorlanCopy {
     static let routingOff = "Off"
     static let routingSplit = "Split"
     static let routingFull = "Full"
+    static let routingSection = "Routing"
+    static let routingPolicySection = "About Routing"
+    static let routingPolicyInfoA11y = "About Routing"
 
     static func routingTitle(_ routing: NetworkRouting) -> String {
         switch routing {
@@ -36,16 +39,16 @@ enum MoorlanCopy {
         case .off:
             return "The tunnel stays off. Your phone uses the network as usual."
         case .split:
-            return "Only home traffic goes through the tunnel. Everything else stays on this network. Recommended on trusted networks."
+            return "Only this tunnel’s private networks go through. Everything else stays on this network. Recommended on trusted networks."
         case .full:
-            return "All traffic goes through home. Recommended for untrusted networks."
+            return "All traffic goes through the tunnel. Recommended for untrusted networks."
         }
     }
 
-    static let homeRoutingFooter =
-        "Until you leave this network. Change permanently in Settings."
-
     static let defaultBadge = "Default"
+    static let onDemandDefaultTitle = "On-demand default"
+    static let onDemandDefaultBody =
+        "This tunnel auto-connects when you’re away from Off networks. Other tunnels do not."
     static let connectedBadge = "Connected"
     static let offHereBadge = "Off"
     static let useAsDefault = "Use as default"
@@ -63,23 +66,19 @@ enum MoorlanCopy {
     static let needNetwork = "Need Wi‑Fi or cellular"
 
     // Empty / scan
-    static let emptyTitle = "Pair with your home"
+    static let emptyTitle = "Pair a tunnel"
     static let emptyBody =
-        "On home Wi‑Fi, open the Camera app and scan the QR from sudo moorlan --pair. Moorlan opens and pairs."
+        "On Wi‑Fi near the Moorlan host, open the Camera app and scan the QR from sudo moorlan --pair. Moorlan opens and pairs."
     static let emptyButton = "Or scan in Moorlan"
     static let scanTitle = "Scan"
     static let scanBody =
-        "Fallback if Camera didn’t open the app. Pair adds a house; unpair removes one. Best on home Wi‑Fi."
+        "Fallback if Camera didn’t open the app. Pair adds a tunnel; unpair removes one. Best on Wi‑Fi near the host."
     static let scanNavA11y = "Scan QR code"
     static let removeTunnelA11y = "Unpair"
     static let tunnelsTitle = "Tunnels"
     static let tunnelDetailsA11y = "Details for"
     static let pickTunnelA11y = "Select this tunnel"
     static let openTunnelDetailsA11y = "Shows details"
-    static let editTunnel = "Edit"
-    static let editTunnelTitle = "Edit Name"
-    static let editTunnelSave = "Save"
-    static let detailsMenu = "Details"
     static let paired = "Paired"
     static let pairing = "Pairing…"
     static let reachingServer = "Reaching server…"
@@ -87,25 +86,14 @@ enum MoorlanCopy {
     static let unpaired = "Unpaired"
     static let unpairConfirmTitlePrefix = "Unpair"
     static let unpairConfirmButton = "Unpair"
-    static let unpairConfirmMessage = "This removes the VPN profile for this house from your iPhone."
-
-    // Settings
-    static let settingsTitle = "Settings"
-    static let routingPolicySection = "Routing Policy"
-    static let routingPolicyInfoA11y = "About Routing Policy"
-    static let cellularSection = "Cellular"
-    static let allowWifiName = "Allow Wi‑Fi name"
-    static let onCellular = "On cellular"
-    static let onWifiNeedName = "On Wi‑Fi — tap to learn its name"
-    static let noWifiYet = "No Wi‑Fi name yet"
-    static let homeBadge = "Home"
+    static let unpairConfirmMessage = "This removes the VPN profile for this tunnel from your iPhone."
 
     // Details
     static let detailsTitle = "Details"
     static let detailsAddress = "Phone address"
     static let detailsEndpoint = "Endpoint"
     static let detailsTunnel = "Tunnel network"
-    static let detailsHomeNets = "Home networks"
+    static let detailsPrivateNets = "Private networks"
     static let detailsDNS = "DNS"
     static let detailsSearch = "Search domains"
     static let detailsKeepalive = "Keepalive"

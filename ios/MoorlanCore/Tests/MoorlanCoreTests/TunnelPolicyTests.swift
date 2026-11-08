@@ -19,14 +19,15 @@ final class TunnelPolicyTests: XCTestCase {
         )
     }
 
-    func testDefaultsWiFiFullCellularSplit() {
+    func testDefaultsWiFiAndCellularFull() {
         let policy = TunnelPolicy()
         XCTAssertEqual(policy.decide(path: .wifi(id: "ssid:Cafe")), .connect(fullTunnel: true))
-        XCTAssertEqual(policy.decide(path: .cellular), .connect(fullTunnel: false))
+        XCTAssertEqual(policy.decide(path: .cellular), .connect(fullTunnel: true))
         XCTAssertEqual(policy.decide(path: .other), .connect(fullTunnel: true))
+        XCTAssertEqual(policy.cellularRouting, .full)
     }
 
-    func testPermanentRoutingMatrix() {
+    func testDurableRoutingMatrix() {
         var policy = TunnelPolicy(networkRouting: [
             "ssid:House": .off,
             "ssid:Office": .split,
@@ -37,21 +38,20 @@ final class TunnelPolicyTests: XCTestCase {
         XCTAssertEqual(policy.decide(path: .wifi(id: "ssid:Cafe")), .connect(fullTunnel: true))
         policy.cellularRouting = .off
         XCTAssertEqual(policy.decide(path: .cellular), .disconnect(reason: "Off on cellular"))
+        policy.cellularRouting = .split
+        XCTAssertEqual(policy.decide(path: .cellular), .connect(fullTunnel: false))
         policy.cellularRouting = .full
         XCTAssertEqual(policy.decide(path: .cellular), .connect(fullTunnel: true))
     }
 
-    func testTemporaryOverride() {
-        let policy = TunnelPolicy(networkRouting: ["ssid:Cafe": .full])
-        XCTAssertEqual(
-            policy.decide(path: .wifi(id: "ssid:Cafe"), override: .off),
-            .disconnect(reason: "Off on this network")
-        )
-        XCTAssertEqual(
-            policy.decide(path: .wifi(id: "ssid:Cafe"), override: .split),
-            .connect(fullTunnel: false)
-        )
-        // Permanent unchanged.
+    func testDurableMapChangePersistsInPolicy() {
+        var policy = TunnelPolicy()
+        XCTAssertEqual(policy.routing(forNetworkID: "ssid:Cafe"), .full)
+        policy.networkRouting["ssid:Cafe"] = .split
+        XCTAssertEqual(policy.decide(path: .wifi(id: "ssid:Cafe")), .connect(fullTunnel: false))
+        policy.networkRouting["ssid:Cafe"] = .off
+        XCTAssertEqual(policy.offSSIDNames, ["Cafe"])
+        policy.networkRouting["ssid:Cafe"] = .full
         XCTAssertEqual(policy.decide(path: .wifi(id: "ssid:Cafe")), .connect(fullTunnel: true))
     }
 
@@ -196,7 +196,7 @@ final class TunnelPolicyTests: XCTestCase {
 
     func testUserFacingErrorsNeverSurfaceRawNEOrURLStrings() {
         let handshake = UserFacingError.map(MoorlanError.handshakeFailed)
-        XCTAssertEqual(handshake.title, "Home didn’t pick up")
+        XCTAssertEqual(handshake.title, "Host didn’t respond")
         XCTAssertEqual(handshake.action, .retry)
         XCTAssertFalse(handshake.message.lowercased().contains("handshake"))
 

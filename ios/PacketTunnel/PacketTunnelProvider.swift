@@ -134,7 +134,7 @@ private final class TunnelController {
         repeat {
             pending = false
             guard let profile, !monitor.snapshot.saturated else { return }
-            // Unsettled path → Full; settled → real permanent policy.
+            // Unsettled path → Full; settled → durable App Group policy.
             let decision: TunnelPolicy.Decision = monitor.snapshot.isStable
                 ? profile.policy.decide(path: monitor.snapshot.kind)
                 : .connect(fullTunnel: true)

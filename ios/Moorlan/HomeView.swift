@@ -4,32 +4,34 @@ import MoorlanCore
 struct HomeView: View {
     @EnvironmentObject private var tunnel: TunnelManager
     var onScan: () -> Void
-    var onSettings: () -> Void
 
     @State private var detailsServer: PairedServer?
-    @State private var editServer: PairedServer?
-    @State private var editName = ""
+    @State private var showRoutingInfo = false
 
     private let cardShape = RoundedRectangle(cornerRadius: 16, style: .continuous)
 
     var body: some View {
         NavigationStack {
-            // Discrete cards (Termius / Hypelist-style), not oversized List rows.
-            // List + contextMenu lifts the table cell and reads as a shrink.
             ScrollView {
                 LazyVStack(spacing: 12) {
+                    RoutingModeTiles(
+                        selection: tunnel.effectiveRouting,
+                        enabled: routingControlEnabled,
+                        onSelect: { tunnel.setRouting($0) },
+                        onInfo: { showRoutingInfo = true }
+                    )
+
                     ForEach(tunnel.servers) { server in
-                        let status = badge(for: server)
-                        let routing = routingBadge(for: server)
+                        let status = statusBadge(for: server)
+                        let isDefault = server.id == tunnel.onDemandActiveID
                         TunnelCard(
                             name: server.displayName,
                             badge: status,
-                            routingBadge: routing,
-                            accent: leadingAccent(for: server, badge: status),
+                            isDefault: isDefault,
+                            accent: leadingAccent(for: server, badge: status, isDefault: isDefault),
                             disabled: tunnel.isUnpairing,
                             shape: cardShape,
-                            onOpen: { detailsServer = server },
-                            menu: { tunnelContextMenu(for: server) }
+                            onOpen: { detailsServer = server }
                         )
                     }
                 }
@@ -41,15 +43,9 @@ struct HomeView: View {
             .navigationTitle(MoorlanCopy.tunnelsTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button(action: onSettings) {
-                        Label(MoorlanCopy.settingsTitle, systemImage: "gearshape")
-                    }
-                    .disabled(tunnel.isUnpairing)
-                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(action: onScan) {
-                        Label(MoorlanCopy.scanNavA11y, systemImage: "plus")
+                        Label(MoorlanCopy.scanNavA11y, systemImage: "camera")
                     }
                     .disabled(tunnel.isUnpairing)
                 }
@@ -57,100 +53,25 @@ struct HomeView: View {
             .sheet(item: $detailsServer) { server in
                 TunnelDetailsSheet(server: server)
             }
-            .alert(MoorlanCopy.editTunnelTitle, isPresented: editAlertPresented) {
-                TextField(MoorlanCopy.editTunnelTitle, text: $editName)
-                    .textInputAutocapitalization(.words)
-                Button(MoorlanCopy.editTunnelSave) {
-                    if let server = editServer {
-                        tunnel.renameServer(server.id, displayName: editName)
-                    }
-                    editServer = nil
-                }
-                Button("Cancel", role: .cancel) {
-                    editServer = nil
-                }
+            .sheet(isPresented: $showRoutingInfo) {
+                RoutingPolicyInfoSheet()
+                    .presentationDetents([.medium])
+                    .presentationDragIndicator(.visible)
             }
         }
     }
 
-    private var editAlertPresented: Binding<Bool> {
-        Binding(
-            get: { editServer != nil },
-            set: { if !$0 { editServer = nil } }
-        )
-    }
-
-    private var routingMenuEnabled: Bool {
+    private var routingControlEnabled: Bool {
         tunnel.currentPathID != nil && tunnel.isPathStable && !tunnel.isUnpairing
-    }
-
-    @ViewBuilder
-    private func tunnelContextMenu(for server: PairedServer) -> some View {
-        let current = tunnel.effectiveRouting
-        Button {
-            tunnel.setTemporaryRouting(.off)
-        } label: {
-            Label(
-                MoorlanCopy.routingOff,
-                systemImage: current == .off ? "checkmark.circle.fill" : "pause.circle"
-            )
-        }
-        .disabled(!routingMenuEnabled)
-
-        Button {
-            tunnel.setTemporaryRouting(.split)
-        } label: {
-            Label(
-                MoorlanCopy.routingSplit,
-                systemImage: current == .split ? "checkmark.circle.fill" : "arrow.triangle.branch"
-            )
-        }
-        .disabled(!routingMenuEnabled)
-
-        Button {
-            tunnel.setTemporaryRouting(.full)
-        } label: {
-            Label(
-                MoorlanCopy.routingFull,
-                systemImage: current == .full ? "checkmark.circle.fill" : "globe"
-            )
-        }
-        .disabled(!routingMenuEnabled)
-
-        Divider()
-
-        Button {
-            editName = server.displayName
-            editServer = server
-        } label: {
-            Label(MoorlanCopy.editTunnel, systemImage: "pencil")
-        }
-
-        Divider()
-
-        Button(role: .destructive) {
-            onScan()
-        } label: {
-            Label(MoorlanCopy.removeTunnelA11y, systemImage: "trash")
-        }
-
-        Divider()
-
-        Button {
-            detailsServer = server
-        } label: {
-            Label(MoorlanCopy.detailsMenu, systemImage: "info.circle")
-        }
     }
 
     private func isSelected(_ server: PairedServer) -> Bool {
         server.id == tunnel.selectedServer?.id
     }
 
-    private func badge(for server: PairedServer) -> String? {
-        guard isSelected(server) else {
-            return server.id == tunnel.onDemandActiveID ? MoorlanCopy.defaultBadge : nil
-        }
+    /// Status only — on-demand default is a card tint, not a pill.
+    private func statusBadge(for server: PairedServer) -> String? {
+        guard isSelected(server) else { return nil }
         if tunnel.isOffOnCurrentPath { return MoorlanCopy.offHereBadge }
         switch tunnel.status {
         case .connected:
@@ -163,21 +84,12 @@ struct HomeView: View {
         case .invalid: return MoorlanCopy.needsAttention
         case .disconnected:
             if tunnel.statusReason == "Waiting for a network" { return MoorlanCopy.needNetwork }
-            return server.id == tunnel.onDemandActiveID ? MoorlanCopy.defaultBadge : nil
+            return nil
         }
     }
 
-    /// Split / Full when connected (Full while the path is settling).
-    private func routingBadge(for server: PairedServer) -> String? {
-        guard isSelected(server), !tunnel.isOffOnCurrentPath else { return nil }
-        let live = tunnel.status == .connected
-            || (tunnel.status == .connecting && !tunnel.isPathStable)
-        guard live else { return nil }
-        return tunnel.effectiveFullTunnel ? MoorlanCopy.routingFull : MoorlanCopy.routingSplit
-    }
-
-    /// Leading card rail (Runna-style), colored by status.
-    private func leadingAccent(for server: PairedServer, badge: String?) -> Color {
+    /// Leading card rail (Runna-style), colored by status; accent when default.
+    private func leadingAccent(for server: PairedServer, badge: String?, isDefault: Bool) -> Color {
         switch badge {
         case MoorlanCopy.connectedBadge:
             return .green
@@ -187,58 +99,103 @@ struct HomeView: View {
             return .red
         case MoorlanCopy.offHereBadge:
             return Color(.tertiaryLabel)
-        case MoorlanCopy.defaultBadge:
-            return Color.accentColor
         default:
-            return server.id == tunnel.onDemandActiveID
-                ? Color.accentColor
-                : Color(.tertiaryLabel)
+            return isDefault ? Color.accentColor : Color(.tertiaryLabel)
         }
     }
 }
 
-/// Tunnel card: tap opens details; ⋯ and long-press share the same actions.
-/// Flicker fix: no Button highlight under long-press; flatten before contextMenu;
-/// preview matches the live card width so the lift doesn’t resize.
-private struct TunnelCard<MenuContent: View>: View {
+/// Target / Amazon-style Off · Split · Full switcher for the current path.
+private struct RoutingModeTiles: View {
+    var selection: NetworkRouting?
+    var enabled: Bool
+    var onSelect: (NetworkRouting) -> Void
+    var onInfo: () -> Void
+
+    private let tileShape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Text(MoorlanCopy.routingSection)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+                Button(action: onInfo) {
+                    Image(systemName: "info.circle")
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(MoorlanCopy.routingPolicyInfoA11y)
+            }
+            .padding(.trailing, -10)
+
+            HStack(spacing: 10) {
+                ForEach(NetworkRouting.allCases, id: \.self) { option in
+                    tile(for: option)
+                }
+            }
+            .disabled(!enabled)
+            .opacity(enabled ? 1 : 0.45)
+        }
+        .padding(.bottom, 4)
+        .accessibilityElement(children: .contain)
+    }
+
+    @ViewBuilder
+    private func tile(for option: NetworkRouting) -> some View {
+        let selected = selection == option
+        Button {
+            onSelect(option)
+        } label: {
+            VStack(spacing: 8) {
+                Image(systemName: MoorlanCopy.routingSymbol(option))
+                    .font(.title2)
+                    .symbolRenderingMode(.hierarchical)
+                Text(MoorlanCopy.routingTitle(option))
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+            }
+            .foregroundStyle(selected ? Color.accentColor : Color.primary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .padding(.horizontal, 6)
+            .background(
+                selected
+                    ? Color.accentColor.opacity(0.12)
+                    : Color(.secondarySystemGroupedBackground),
+                in: tileShape
+            )
+            .overlay(
+                tileShape.strokeBorder(
+                    selected ? Color.accentColor : Color(.separator),
+                    lineWidth: selected ? 2 : 1
+                )
+            )
+            .contentShape(tileShape)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(MoorlanCopy.routingInfoTitle(option))
+        .accessibilityValue(MoorlanCopy.routingInfoBody(option))
+        .accessibilityAddTraits(selected ? [.isSelected, .isButton] : .isButton)
+    }
+}
+
+/// Tunnel card: tap opens details. On-demand default uses a tinted fill.
+private struct TunnelCard: View {
     var name: String
     var badge: String?
-    var routingBadge: String?
+    var isDefault: Bool
     var accent: Color
     var disabled: Bool
     var shape: RoundedRectangle
     var onOpen: () -> Void
-    @ViewBuilder var menu: () -> MenuContent
-
-    @State private var cardWidth: CGFloat = 0
 
     var body: some View {
-        cardContent(showMenuControl: true)
-            .background {
-                GeometryReader { geo in
-                    Color.clear
-                        .onAppear { cardWidth = geo.size.width }
-                        .onChange(of: geo.size.width) { _, width in cardWidth = width }
-                }
-            }
-            .background(Color(.secondarySystemGroupedBackground), in: shape)
-            .clipShape(shape)
-            .compositingGroup()
-            .contentShape(shape)
-            .contextMenu {
-                menu()
-            } preview: {
-                cardContent(showMenuControl: false)
-                    .frame(width: cardWidth > 0 ? cardWidth : nil)
-                    .background(Color(.secondarySystemGroupedBackground), in: shape)
-                    .clipShape(shape)
-                    .compositingGroup()
-            }
-            .disabled(disabled)
-    }
-
-    @ViewBuilder
-    private func cardContent(showMenuControl: Bool) -> some View {
         HStack(spacing: 0) {
             // Runna-style leading rail — flush to the card edge.
             Rectangle()
@@ -246,44 +203,44 @@ private struct TunnelCard<MenuContent: View>: View {
                 .frame(width: 4)
                 .accessibilityHidden(true)
 
-            HStack(spacing: 8) {
-                TunnelRow(name: name, badge: badge, routingBadge: routingBadge)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        guard !disabled else { return }
-                        onOpen()
-                    }
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityAddTraits(.isButton)
-                    .accessibilityLabel(name)
-                    .accessibilityValue([badge, routingBadge].compactMap { $0 }.joined(separator: ", "))
-                    .accessibilityHint(MoorlanCopy.openTunnelDetailsA11y)
-
-                if showMenuControl {
-                    Menu(content: menu) {
-                        Image(systemName: "ellipsis.circle")
-                            .font(.title3)
-                            .foregroundStyle(.secondary)
-                            .frame(width: 44, height: 44)
-                            .contentShape(Rectangle())
-                    }
-                    .disabled(disabled)
-                    .accessibilityLabel("More for \(name)")
-                }
-            }
-            .padding(.leading, 16)
-            .padding(.trailing, 10)
-            .padding(.vertical, 18)
+            TunnelRow(name: name, badge: badge)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 18)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background(cardFill, in: shape)
+        .clipShape(shape)
+        .contentShape(shape)
+        .onTapGesture {
+            guard !disabled else { return }
+            onOpen()
+        }
+        .disabled(disabled)
+        .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel(name)
+        .accessibilityValue(accessibilityValue)
+        .accessibilityHint(MoorlanCopy.openTunnelDetailsA11y)
+    }
+
+    private var cardFill: Color {
+        if isDefault {
+            return Color.accentColor.opacity(0.12)
+        }
+        return Color(.secondarySystemGroupedBackground)
+    }
+
+    private var accessibilityValue: String {
+        [badge, isDefault ? MoorlanCopy.defaultBadge : nil]
+            .compactMap { $0 }
+            .joined(separator: ", ")
     }
 }
 
-/// Quiet list row: tunnel name + optional status / routing pills.
+/// Quiet list row: tunnel name + optional status pill.
 private struct TunnelRow: View {
     var name: String
     var badge: String?
-    var routingBadge: String?
 
     var body: some View {
         HStack(spacing: 14) {
@@ -292,13 +249,8 @@ private struct TunnelRow: View {
                 .foregroundStyle(.primary)
                 .lineLimit(1)
             Spacer(minLength: 0)
-            HStack(spacing: 6) {
-                if let badge {
-                    StatusPill(text: badge, kind: .status(badge))
-                }
-                if let routingBadge {
-                    StatusPill(text: routingBadge, kind: .routing)
-                }
+            if let badge {
+                StatusPill(text: badge)
             }
         }
         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
@@ -307,13 +259,7 @@ private struct TunnelRow: View {
 }
 
 private struct StatusPill: View {
-    enum Kind {
-        case status(String)
-        case routing
-    }
-
     var text: String
-    var kind: Kind
 
     var body: some View {
         Text(text)
@@ -325,38 +271,28 @@ private struct StatusPill: View {
     }
 
     private var foreground: Color {
-        switch kind {
-        case .routing:
+        switch text {
+        case MoorlanCopy.connectedBadge:
+            return .white
+        case MoorlanCopy.connecting:
+            return Color.accentColor
+        case MoorlanCopy.needsAttention:
+            return .white
+        default:
             return .secondary
-        case .status(let badge):
-            switch badge {
-            case MoorlanCopy.connectedBadge:
-                return .white
-            case MoorlanCopy.connecting, MoorlanCopy.defaultBadge:
-                return Color.accentColor
-            case MoorlanCopy.needsAttention:
-                return .white
-            default:
-                return .secondary
-            }
         }
     }
 
     private var background: Color {
-        switch kind {
-        case .routing:
+        switch text {
+        case MoorlanCopy.connectedBadge:
+            return .green
+        case MoorlanCopy.connecting:
+            return Color.accentColor.opacity(0.15)
+        case MoorlanCopy.needsAttention:
+            return .red
+        default:
             return Color(.tertiarySystemFill)
-        case .status(let badge):
-            switch badge {
-            case MoorlanCopy.connectedBadge:
-                return .green
-            case MoorlanCopy.connecting, MoorlanCopy.defaultBadge:
-                return Color.accentColor.opacity(0.15)
-            case MoorlanCopy.needsAttention:
-                return .red
-            default:
-                return Color(.tertiarySystemFill)
-            }
         }
     }
 }

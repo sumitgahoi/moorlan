@@ -108,10 +108,11 @@ public struct UserFacingError: Equatable, Sendable, Identifiable {
                 action: .retry
             )
         case .unpairFailed(let detail):
-            if detail.localizedCaseInsensitiveContains("home Wi") || detail.localizedCaseInsensitiveContains("home Wi‑Fi") {
+            if detail.localizedCaseInsensitiveContains("home Wi") || detail.localizedCaseInsensitiveContains("home Wi‑Fi")
+                || detail.localizedCaseInsensitiveContains("marked Off") {
                 return UserFacingError(
-                    title: "Join home Wi‑Fi",
-                    message: "Unpairing needs one of this profile’s Home networks. Connect there, then scan again.",
+                    title: "Join an Off Wi‑Fi",
+                    message: "Unpairing needs a Wi‑Fi marked Off for this tunnel. Connect there, then scan again.",
                     action: .retry
                 )
             }
@@ -139,7 +140,7 @@ public struct UserFacingError: Equatable, Sendable, Identifiable {
                 || detail.localizedCaseInsensitiveContains("Settings")
             return UserFacingError(
                 title: "Can’t reach the host",
-                message: friendlyDetail(detail, fallback: "Join home Wi‑Fi, allow Local Network for Moorlan, and keep the host in pair mode."),
+                message: friendlyDetail(detail, fallback: "Join Wi‑Fi near the host, allow Local Network for Moorlan, and keep the host in pair mode."),
                 action: needsSettings ? .openSettings : .retry
             )
         case .missingIdentity:
@@ -186,8 +187,8 @@ public struct UserFacingError: Equatable, Sendable, Identifiable {
             )
         case .handshakeFailed:
             return UserFacingError(
-                title: "Home didn’t pick up",
-                message: "We knocked, but the house didn’t open the door. Make sure Moorlan is running at home, then tap Retry.",
+                title: "Host didn’t respond",
+                message: "The tunnel is up, but the Moorlan host did not complete a handshake. Make sure the host is online, then tap Retry.",
                 action: .retry
             )
         case .storageFailed:
@@ -211,7 +212,7 @@ public struct UserFacingError: Equatable, Sendable, Identifiable {
              .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed:
             return UserFacingError(
                 title: "Can’t reach the host",
-                message: "Join home Wi‑Fi, allow Local Network for Moorlan, and keep the host in pair mode.",
+                message: "Join Wi‑Fi near the host, allow Local Network for Moorlan, and keep the host in pair mode.",
                 action: .openSettings
             )
         default:
