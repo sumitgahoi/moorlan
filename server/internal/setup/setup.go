@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"moorlan/internal/runtime"
 	"moorlan/internal/settings"
@@ -86,6 +87,15 @@ func Run(opts Options) error {
 		fmt.Fprintf(stderr, "\nNo WireGuard interfaces discovered. Bring one up, then: sudo moorlan --setup\n")
 		return nil
 	}
-	fmt.Fprintf(stderr, "\nReview %s (set enabled: true on interfaces to manage),\nthen: sudo moorlan --pair\n", settings.Path)
+	parts := make([]string, 0, len(merged.Interfaces))
+	for _, name := range merged.InterfaceNames() {
+		en := false
+		if e := merged.Interfaces[name].Enabled; e != nil {
+			en = *e
+		}
+		parts = append(parts, fmt.Sprintf("%s (enabled: %v)", name, en))
+	}
+	fmt.Fprintf(stderr, "\nFound %s. Review and set enabled: true:\n  sudoedit %s\nthen: sudo moorlan --pair\n",
+		strings.Join(parts, ", "), settings.Path)
 	return nil
 }
