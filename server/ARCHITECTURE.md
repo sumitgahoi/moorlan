@@ -77,14 +77,15 @@ sequenceDiagram
 
   Op->>Sh: curl install.sh
   Sh->>CLI: replace binary, run --setup
-  CLI->>CLI: unit + DB migrate + discover
   CLI->>Conf: create or merge YAML
+  CLI->>CLI: DB migrate, replace unit, enable for boot
   Op->>Conf: set enabled true
   Note over Op,CLI: Day to day: moorlan --pair
 ```
 
 - `install.sh` is the exclusive supported install/upgrade path.
-- `--setup` merges guesses with existing conf (existing set fields win).
+- `--setup` order: YAML merge → DB migrate → unit replace → enable (no reconcile).
+- Reconcile runs on boot or via `--pair` / `--reconcile`.
 - First successful use of an interface inserts `interfaces(name, server_public_key)`.
 
 ### Pair

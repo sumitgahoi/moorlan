@@ -25,16 +25,12 @@ func UnitPath() string {
 // UnitName is the systemd unit name.
 const UnitName = "moorlan-reconcile.service"
 
-// Install writes the embedded unit if content differs, then daemon-reloads and
-// enables it for boot. It does not start the oneshot (reconcile needs site conf
-// and may soft-fail until WireGuard is up); callers may Start after YAML exists.
-func Install() (changed bool, err error) {
+// InstallUnit writes the embedded unit if content differs and daemon-reloads.
+// It does not enable or start the unit.
+func InstallUnit() (changed bool, err error) {
 	path := UnitPath()
 	want := Render()
 	if existing, err := os.ReadFile(path); err == nil && string(existing) == want {
-		if err := enableUnit(); err != nil {
-			return false, err
-		}
 		return false, nil
 	}
 	if err := os.WriteFile(path, []byte(want), 0o644); err != nil {
@@ -43,19 +39,11 @@ func Install() (changed bool, err error) {
 	if err := runSystemctl("daemon-reload"); err != nil {
 		return true, err
 	}
-	if err := enableUnit(); err != nil {
-		return true, err
-	}
 	return true, nil
 }
 
-// Start runs the reconcile oneshot once. Failure is common before interfaces
-// are enabled or WireGuard is up; callers should treat it as best-effort.
-func Start() error {
-	return runSystemctl("start", UnitName)
-}
-
-func enableUnit() error {
+// Enable enables the unit for boot. It does not start reconcile now.
+func Enable() error {
 	return runSystemctl("enable", UnitName)
 }
 

@@ -125,7 +125,7 @@ interface in stable name order.
 
 | Command | Behavior | Success means |
 | --- | --- | --- |
-| `--setup` | Sync embedded systemd reconcile unit (enable); open DB and apply additive schema migrate; discover WG/LAN; create or merge `/etc/moorlan/moorlan.yaml` (existing set fields win; new ifaces `enabled: false`); print summary and ask to review before `--pair` | YAML written; unit installed |
+| `--setup` | In order: create/merge `/etc/moorlan/moorlan.yaml` (existing set fields win; new ifaces `enabled: false`); additive DB migrate; replace embedded systemd unit; `systemctl enable` (boot only — does **not** run reconcile); print summary and ask to review before `--pair`. Binary placement is `install.sh` only. | YAML written; unit enabled |
 | `--pair [--interface <iface>]` | Interface MUST be listed and **`enabled: true`**. If exactly one enabled interface, `--interface` MAY be omitted; if more than one enabled, `--interface` is required. Reconcile that iface, print pair QR, serve HTTP on root `private-endpoint` | Session until idle/Ctrl-C; each enroll: DB committed and reconcile attempted |
 | `--unpair [--interface <iface>]` | Same selection among enabled YAML ifaces when listed; when the iface is absent/disabled in YAML but still has DB state, `--interface` is required. Reconcile, print unpair QR, DELETE-only HTTP server | Peer removed from DB → HTTP success; live MAY lag until next reconcile |
 | `--remove --interface <iface> --peer-public-key <key>` | Admin revoke by peer WireGuard public key (no QR). Works with DB state even if iface is absent/disabled in YAML | Same DB-first success as unpair |

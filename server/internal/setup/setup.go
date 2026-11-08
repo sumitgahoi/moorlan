@@ -1,4 +1,4 @@
-// Package setup implements moorlan --setup: unit install, DB migrate, YAML guess/merge.
+// Package setup implements moorlan --setup: YAML merge, DB migrate, unit enable.
 package setup
 
 import (
@@ -18,8 +18,9 @@ type Options struct {
 	Stderr io.Writer
 }
 
-// Run installs the systemd unit, migrates the peer DB, discovers host state,
-// merges into site YAML, and prints a review summary.
+// Run follows the install sequence after the binary is already on disk:
+// merge YAML → migrate DB → replace systemd unit → enable for boot → messages.
+// It does not run reconcile; that happens on boot or via --pair / --reconcile.
 func Run(opts Options) error {
 	stdout := opts.Stdout
 	if stdout == nil {
@@ -30,21 +31,7 @@ func Run(opts Options) error {
 		stderr = os.Stderr
 	}
 
-	changed, err := systemd.Install()
-	if err != nil {
-		return fmt.Errorf("install systemd unit: %w", err)
-	}
-	if changed {
-		fmt.Fprintf(stderr, "moorlan: installed %s\n", systemd.UnitPath())
-	} else {
-		fmt.Fprintf(stderr, "moorlan: systemd unit up to date\n")
-	}
-
-	if err := runtime.MigrateStore(runtime.DefaultStorePath); err != nil {
-		return fmt.Errorf("migrate database: %w", err)
-	}
-	fmt.Fprintf(stderr, "moorlan: database ready at %s\n", runtime.DefaultStorePath)
-
+	// 1. Discover + create/merge site YAML
 	guessed, notes, err := Discover(opts.Stun)
 	if err != nil {
 		return fmt.Errorf("discover: %w", err)
@@ -69,17 +56,34 @@ func Run(opts Options) error {
 		}
 		fmt.Fprintf(stderr, "moorlan: merged into %s\n", settings.Path)
 	}
-
 	if err := settings.Write(merged); err != nil {
 		return err
 	}
 
-	if err := systemd.Start(); err != nil {
-		fmt.Fprintf(stderr, "moorlan: reconcile start skipped (%v); runs on boot or: sudo moorlan --reconcile\n", err)
+	// 2. Upgrade DB if needed
+	if err := runtime.MigrateStore(runtime.DefaultStorePath); err != nil {
+		return fmt.Errorf("migrate database: %w", err)
+	}
+	fmt.Fprintf(stderr, "moorlan: database ready at %s\n", runtime.DefaultStorePath)
+
+	// 3. Replace systemd unit
+	changed, err := systemd.InstallUnit()
+	if err != nil {
+		return fmt.Errorf("install systemd unit: %w", err)
+	}
+	if changed {
+		fmt.Fprintf(stderr, "moorlan: installed %s\n", systemd.UnitPath())
 	} else {
-		fmt.Fprintf(stderr, "moorlan: reconcile oneshot started\n")
+		fmt.Fprintf(stderr, "moorlan: systemd unit up to date\n")
 	}
 
+	// 4. Enable for boot only (no reconcile now)
+	if err := systemd.Enable(); err != nil {
+		return fmt.Errorf("enable systemd unit: %w", err)
+	}
+	fmt.Fprintf(stderr, "moorlan: reconcile unit enabled for boot\n")
+
+	// 5. Post-install messages
 	printSummary(stdout, merged)
 	fmt.Fprintf(stderr, "\nReview %s (set enabled: true on interfaces to manage),\nthen: sudo moorlan --pair\n", settings.Path)
 	return nil
