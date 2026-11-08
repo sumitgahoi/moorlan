@@ -19,6 +19,7 @@ import (
 	"moorlan/internal/qr"
 	"moorlan/internal/runtime"
 	"moorlan/internal/settings"
+	"moorlan/internal/setup"
 )
 
 func main() {
@@ -31,13 +32,14 @@ func main() {
 func run() error {
 	fs := flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
+	setupMode := fs.Bool("setup", false, "install systemd unit, migrate DB, create/merge site YAML")
 	pairMode := fs.Bool("pair", false, "print pair QR; enroll devices until idle (2 minutes) or Ctrl-C")
 	unpair := fs.Bool("unpair", false, "print unpair QR; accept deletions until idle (2 minutes) or Ctrl-C")
 	remove := fs.Bool("remove", false, "remove a managed peer by WireGuard public key and exit")
 	peerPublicKey := fs.String("peer-public-key", "", "peer WireGuard public key (with --remove)")
 	listPeers := fs.Bool("list-peers", false, "print enrolled peers (label, public key, address) and exit")
 	reconcile := fs.Bool("reconcile", false, "apply SQLite peers onto live devices and exit")
-	iface := fs.String("interface", "", "WireGuard interface (required if YAML lists multiple; also for --remove)")
+	iface := fs.String("interface", "", "WireGuard interface (required if multiple enabled; also for --remove)")
 	fs.Usage = printUsage
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		if err == flag.ErrHelp {
@@ -47,17 +49,17 @@ func run() error {
 	}
 
 	modes := 0
-	for _, on := range []bool{*pairMode, *unpair, *reconcile, *listPeers, *remove} {
+	for _, on := range []bool{*setupMode, *pairMode, *unpair, *reconcile, *listPeers, *remove} {
 		if on {
 			modes++
 		}
 	}
 	if modes == 0 {
 		printUsage()
-		return fmt.Errorf("specify --pair, --unpair, --remove, --list-peers, or --reconcile")
+		return fmt.Errorf("specify --setup, --pair, --unpair, --remove, --list-peers, or --reconcile")
 	}
 	if modes > 1 {
-		return fmt.Errorf("use only one of --pair, --unpair, --remove, --list-peers, or --reconcile")
+		return fmt.Errorf("use only one of --setup, --pair, --unpair, --remove, --list-peers, or --reconcile")
 	}
 	if *peerPublicKey != "" && !*remove {
 		return fmt.Errorf("--peer-public-key is only valid with --remove")
@@ -76,6 +78,10 @@ func run() error {
 
 	if os.Geteuid() != 0 {
 		return fmt.Errorf("must run as root (try: sudo moorlan)")
+	}
+
+	if *setupMode {
+		return setup.Run(setup.Options{})
 	}
 
 	site, err := settings.Load()
@@ -114,6 +120,9 @@ func run() error {
 		cfg, ok := site.Lookup(name)
 		if !ok {
 			return fmt.Errorf("interface %s is not listed in %s", name, settings.Path)
+		}
+		if !cfg.Enabled {
+			return fmt.Errorf("interface %s has enabled: false; set enabled: true in %s or run: sudo moorlan --setup", name, settings.Path)
 		}
 		host, err = runtime.Discover(name, storePath, site.PrivateEndpoint, cfg.HomeNetworks, cfg.PublicEndpoint, cfg.DNSServers, cfg.DNSSearch, cfg.Name)
 	}
@@ -206,10 +215,15 @@ func shortKey(key string) string {
 }
 
 func resolveSessionInterface(site settings.Site, storePath, ifaceFlag string, unpairOnly bool) (string, error) {
-	yamlNames := site.InterfaceNames()
+	enabledNames := site.EnabledInterfaceNames()
 	if ifaceFlag != "" {
-		if _, ok := site.Lookup(ifaceFlag); ok {
-			return ifaceFlag, nil
+		if cfg, ok := site.Lookup(ifaceFlag); ok {
+			if !unpairOnly && !cfg.Enabled {
+				return "", fmt.Errorf("interface %s has enabled: false; set enabled: true in %s", ifaceFlag, settings.Path)
+			}
+			if cfg.Enabled || unpairOnly {
+				return ifaceFlag, nil
+			}
 		}
 		if !unpairOnly {
 			return "", fmt.Errorf("interface %s is not listed in %s", ifaceFlag, settings.Path)
@@ -225,16 +239,16 @@ func resolveSessionInterface(site settings.Site, storePath, ifaceFlag string, un
 		}
 		return "", fmt.Errorf("interface %s is not in %s or the peer database", ifaceFlag, settings.Path)
 	}
-	if len(yamlNames) == 1 {
-		return yamlNames[0], nil
+	if len(enabledNames) == 1 {
+		return enabledNames[0], nil
 	}
-	if len(yamlNames) == 0 {
+	if len(enabledNames) == 0 {
 		if unpairOnly {
-			return "", fmt.Errorf("--interface is required when no interfaces are listed in %s", settings.Path)
+			return "", fmt.Errorf("--interface is required when no enabled interfaces are listed in %s", settings.Path)
 		}
-		return "", fmt.Errorf("no interfaces listed in %s", settings.Path)
+		return "", fmt.Errorf("no enabled interfaces in %s; set enabled: true or run: sudo moorlan --setup", settings.Path)
 	}
-	return "", fmt.Errorf("--interface is required when multiple interfaces are configured (%s)", strings.Join(yamlNames, ", "))
+	return "", fmt.Errorf("--interface is required when multiple interfaces are enabled (%s)", strings.Join(enabledNames, ", "))
 }
 
 func runReconcile(ctx context.Context, site settings.Site, storePath, ifaceFlag string) error {
@@ -242,12 +256,12 @@ func runReconcile(ctx context.Context, site settings.Site, storePath, ifaceFlag 
 	if err != nil {
 		return err
 	}
-	targets, err := runtime.ReconcileTargets(site.InterfaceNames(), dbNames, ifaceFlag)
+	targets, err := runtime.ReconcileTargets(site.EnabledInterfaceNames(), dbNames, ifaceFlag)
 	if err != nil {
 		return err
 	}
 	if len(targets) == 0 {
-		fmt.Printf("nothing to reconcile (no interfaces in %s or %s)\n", settings.Path, storePath)
+		fmt.Printf("nothing to reconcile (no enabled interfaces in %s or %s)\n", settings.Path, storePath)
 		return nil
 	}
 	var failed int
@@ -313,20 +327,24 @@ func runRemove(ctx context.Context, storePath, iface, peerPublicKey string) erro
 
 func printUsage() {
 	fmt.Fprint(os.Stderr, `Usage:
+  moorlan --setup
   moorlan --pair [--interface <iface>]
   moorlan --unpair [--interface <iface>]
   moorlan --list-peers [--interface <iface>]
   moorlan --remove --interface <iface> --peer-public-key <key>
   moorlan --reconcile [--interface <iface>]
 
---pair / --unpair print a QR on stdout and serve LAN HTTP until idle (2 minutes
-with no success) or Ctrl-C. Success and errors go to stderr. Omit --interface
-when the site YAML lists exactly one WireGuard interface; required when it lists
-more than one. --unpair also accepts --interface for a iface that still has
-peers in the DB after removal from YAML. --remove always needs --interface.
+Install/upgrade: curl install.sh | sudo bash  (replaces binary, then --setup).
+--setup installs the reconcile unit, migrates the DB, and create/merges
+/etc/moorlan/moorlan.yaml (review and set enabled: true, then --pair).
 
-Site conf: /etc/moorlan/moorlan.yaml (not your wg-quick/networkd device file).
-Peers live in SQLite at /var/lib/moorlan/moorlan.db. See server/README.md.
+--pair / --unpair print a QR on stdout and serve LAN HTTP until idle (2 minutes
+with no success) or Ctrl-C. Omit --interface when exactly one interface has
+enabled: true. --unpair also accepts --interface for a iface that still has
+peers in the DB after disable/removal from YAML. --remove always needs --interface.
+
+Site conf: /etc/moorlan/moorlan.yaml. Peers: /var/lib/moorlan/moorlan.db.
+See server/README.md.
 `)
 }
 

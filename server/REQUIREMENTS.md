@@ -7,7 +7,7 @@ system for operators and engineers.
 ## 1. Product intent
 
 - Pair phones to an **existing** Linux WireGuard device over **trusted home LAN HTTP**.
-- v1 core only: enroll, list, revoke, boot-reapply peers. Nothing else.
+- v1 core: install/setup (guess site conf), enroll, list, revoke, boot-reapply peers.
 
 ## 2. Trust model
 
@@ -26,17 +26,17 @@ system for operators and engineers.
 | Role | Owns | Does not own |
 | --- | --- | --- |
 | Host (networkd / wg-quick / …) | WireGuard device: private key, address, listen port, routes, firewall | Peer enrollment |
-| Operator | Creates/edits `/etc/moorlan/moorlan.yaml` from the shipped example; enables the reconcile unit | Peer rows |
+| Operator | Reviews/edits `/etc/moorlan/moorlan.yaml` after `--setup`; sets `enabled` | Peer rows |
 | `/etc/moorlan/moorlan.yaml` | Static host + per-interface settings (source of truth for those settings) | Peers |
 | SQLite (`/var/lib/moorlan/moorlan.db`) | **Source of truth for enrolled peers** and per-interface server public keys | Live kernel state |
 | Live WireGuard (wgctrl) | Projection of SQLite peers | Persistence |
 | systemd oneshot | Boot `--reconcile` across managed interfaces (bounded retries) | Long-running daemon |
-| Binary `/usr/local/bin/moorlan` | CLI; path invoked by the reconcile unit | Host networking; authoring YAML |
+| Binary `/usr/local/bin/moorlan` | CLI; path invoked by the reconcile unit; `--setup` writes unit + site YAML | Host networking ownership |
 
 Invariants:
 
-- YAML lists interfaces used for **new** enroll and lease fields. There is no
-  separate registration CLI and no device “ownership” ceremony.
+- YAML lists interfaces; only **`enabled: true`** interfaces are used for **new**
+  enroll. There is no separate registration CLI.
 - Reconcile MUST project SQLite → live for each interface it reconciles:
   ensure each DB peer is present with correct AllowedIPs, then remove every live
   peer absent from the DB for that interface.
@@ -47,9 +47,9 @@ Invariants:
   interface name). It MUST NOT be updated. If the live WireGuard public key does
   not match the stored row, Moorlan MUST refuse to operate on that interface.
 
-### Interface removed from YAML
+### Interface disabled or removed from YAML
 
-- `--pair` for that interface MUST fail (interface not listed).
+- `--pair` for a disabled or absent interface MUST fail.
 - Existing peers in SQLite continue to work: reconcile still applies them; live
   peers remain usable.
 - `--unpair`, `--remove`, and `--list-peers` MUST still work from the DB for that
@@ -59,12 +59,17 @@ Invariants:
 
 - Linux, root.
 - An existing, up WireGuard interface with **exactly one** private IPv4 address
-  in a `/16`–`/30` prefix. Operators are expected to start each device with zero
-  peers (see README); the server does not enforce a zero-peer check.
-- Per interface, sticky `public-endpoint` (`host:port`) is required. No STUN,
-  UPnP, relay, or LAN-only public-endpoint fallback. The advertised port is
-  whatever reaches this iface from the internet (may differ from the local listen
-  port when NAT/port-mapping is used); the server MUST NOT require them to match.
+  in a `/16`–`/30` prefix. Operators often start each device with zero peers;
+  the server does not enforce a zero-peer check. Enabling an iface that already
+  has live peers MAY strip those peers from the live device on reconcile (conf
+  files are untouched; `enabled: false` + restart WG from host conf restores
+  conf-backed peers).
+- Per interface, sticky `public-endpoint` (`host:port`) is required after setup.
+  `--setup` MAY best-effort guess it via STUN (bound to the WG listen port), with
+  a global unicast IPv4 + listen-port fallback. No UPnP or relays. Operators MAY
+  override with DDNS. The advertised port is whatever reaches this iface from the
+  internet (may differ from the local listen port when NAT/port-mapping is used);
+  the server MUST NOT require them to match.
 - Per interface, `home-networks`: one or more private IPv4 prefixes. MUST NOT
   overlap that interface’s tunnel subnet. These are split-tunnel destinations on
   the phone (LAN reachability when away). They are **not** hairpin / home Wi‑Fi
@@ -79,22 +84,22 @@ Invariants:
 ## 5. Site conf (YAML)
 
 - Canonical path only: `/etc/moorlan/moorlan.yaml`.
-- Shipped example: `/usr/share/moorlan/moorlan.yaml.example` — a minimal
-  template with an illustrative `private-endpoint` and `interfaces: {}` so first
-  install manages nothing. Full interface example lives in [README.md](README.md)
-  as copy-paste YAML (not a commented block in the example file).
+- Shipped example: `/usr/share/moorlan/moorlan.yaml.example` — minimal template
+  (`interfaces: {}`) for reference; normal path is `--setup` create/merge.
 - Root `private-endpoint` is always required. Empty `interfaces` is valid;
   `--reconcile` is a successful no-op. Peer DB path is fixed at
   `/var/lib/moorlan/moorlan.db` (not a YAML key).
-- Under `interfaces.<name>`: `name`, `public-endpoint`, `home-networks`,
-  `dns-servers` (required), `dns-search` (optional). Map key `<name>` is the
-  WireGuard interface name. `name` is the tunnel display name phones
-  show after pairing (max 64 characters; same rules as a device label).
+- Under `interfaces.<name>`: `enabled` (required bool), `name`, `public-endpoint`,
+  `home-networks`, `dns-servers` (required), `dns-search` (optional). Map key
+  `<name>` is the WireGuard interface name. `name` is the tunnel display name
+  phones show after pairing (max 64 characters; same rules as a device label).
+- Missing `enabled` MUST fail load (no omit default).
 - List-valued keys preserve order as preference order. Unknown keys MUST fail
   load.
 - Site settings come from the YAML file only. No CLI overrides of site keys in v1.
-- Setup (operator-facing; see [README.md](README.md)): run `install.sh`, edit
-  `/etc/moorlan/moorlan.yaml` once, then use `--pair` day to day.
+- Operator path: run `install.sh` (exclusive supported install/upgrade) → review
+  YAML / set `enabled: true` → `--pair` day to day. From source: place binary,
+  then `moorlan --setup`.
 
 ### Naming
 
@@ -113,22 +118,45 @@ Invariants:
 
 ## 6. Commands
 
-Exactly one primary mode per process. One flock per interface
-(`/run/moorlan-<iface>.lock`); concurrent mutators on the same interface MUST be
-refused. `--reconcile` with no interface locks each target interface in stable
-name order.
+Exactly one primary mode per process (or bare usage with no mode). One flock per
+interface (`/run/moorlan-<iface>.lock`); concurrent mutators on the same
+interface MUST be refused. `--reconcile` with no interface locks each target
+interface in stable name order.
 
 | Command | Behavior | Success means |
 | --- | --- | --- |
-| `--pair [--interface <iface>]` | Interface MUST be listed in YAML. If YAML lists exactly one interface, `--interface` MAY be omitted; if more than one, `--interface` is required. Reconcile that iface, print pair QR, serve HTTP on root `private-endpoint` | Session until idle/Ctrl-C; each enroll: DB committed and reconcile attempted |
-| `--unpair [--interface <iface>]` | Same interface selection rules when the iface is in YAML; when the iface is absent from YAML but still has DB state, `--interface` is required. Reconcile, print unpair QR, DELETE-only HTTP server | Peer removed from DB → HTTP success; live MAY lag until next reconcile |
-| `--remove --interface <iface> --peer-public-key <key>` | Admin revoke by peer WireGuard public key (no QR). Works with DB state even if iface is absent from YAML | Same DB-first success as unpair |
+| `--setup` | Sync embedded systemd reconcile unit (enable); open DB and apply additive schema migrate; discover WG/LAN; create or merge `/etc/moorlan/moorlan.yaml` (existing set fields win; new ifaces `enabled: false`); print summary and ask to review before `--pair` | YAML written; unit installed |
+| `--pair [--interface <iface>]` | Interface MUST be listed and **`enabled: true`**. If exactly one enabled interface, `--interface` MAY be omitted; if more than one enabled, `--interface` is required. Reconcile that iface, print pair QR, serve HTTP on root `private-endpoint` | Session until idle/Ctrl-C; each enroll: DB committed and reconcile attempted |
+| `--unpair [--interface <iface>]` | Same selection among enabled YAML ifaces when listed; when the iface is absent/disabled in YAML but still has DB state, `--interface` is required. Reconcile, print unpair QR, DELETE-only HTTP server | Peer removed from DB → HTTP success; live MAY lag until next reconcile |
+| `--remove --interface <iface> --peer-public-key <key>` | Admin revoke by peer WireGuard public key (no QR). Works with DB state even if iface is absent/disabled in YAML | Same DB-first success as unpair |
 | `--list-peers [--interface <iface>]` | Print label, public key, address from SQLite. Optional `--interface` filters; omit to list all | Read-only |
-| `--reconcile [--interface <iface>]` | With `--interface`: apply SQLite → live for that iface. Without: every iface that appears in YAML **or** still has rows in `interfaces` / `peers`. Soft-fail per iface inside the run (one down device MUST NOT block others); process exits non-zero if any target failed so boot retries can continue | Each successful iface: live matches DB; overall process fails (retryable) if any target failed |
+| `--reconcile [--interface <iface>]` | With `--interface`: apply SQLite → live for that iface. Without: every **enabled** YAML iface **or** still has rows in `interfaces` / `peers`. Soft-fail per iface inside the run; process exits non-zero if any target failed so boot retries can continue | Each successful iface: live matches DB; overall process fails (retryable) if any target failed |
+
+Bare `moorlan` (no mode flags) prints usage and exits non-zero (or zero on `-h`/`--help` only via flag help).
 
 `--rehydrate` is not a product name; boot and operators use `--reconcile`.
 
 There is no `--add-interface` or `--remove-interface`.
+
+### Install / upgrade (exclusive)
+
+- Supported path: `install.sh` replaces `/usr/local/bin/moorlan`, then runs
+  `moorlan --setup`. Re-run `install.sh` to upgrade.
+- Replacing the binary without `--setup` / `install.sh` is unsupported.
+- `--setup` does not download a binary. From source: install binary to path, then
+  `moorlan --setup`.
+
+### `--setup` merge
+
+- Guessed site: all up WireGuard devices with exactly one private IPv4
+  (`/16`–`/30`); `enabled: false`; STUN (or fallback) for `public-endpoint`;
+  LAN prefixes for `home-networks`; WG address for `dns-servers`;
+  `dns-search: [home.arpa]`; shared `private-endpoint` from first suitable LAN IP
+  + port `8756`.
+- If YAML missing → write guessed. If present → must validate, then merge:
+  existing non-empty strings/lists and existing `enabled` win; new guessed ifaces
+  added; stanzas only in existing YAML kept (stderr note if not seen on host).
+- Atomic write (temp + rename).
 
 ## 7. Pair / unpair protocol
 
@@ -150,8 +178,9 @@ moorlan://v1/pair?url=http%3A%2F%2F<private-endpoint>%2Fv1%2Fpair&spk=<server-wg
 
 - `POST /v1/pair` body: `{"public_key":"<peer>","label":"<device label>"}`.
 - Enroll is allowed only for the interface selected for this `--pair` session, and
-  that interface MUST be present in YAML. Lease fields come from the YAML stanza
-  for that interface plus root `private-endpoint` for the pair URL.
+  that interface MUST be present in YAML and `enabled: true`. Lease fields come
+  from the YAML stanza for that interface plus root `private-endpoint` for the
+  pair URL.
 - Server allocates the next free `/32` in the tunnel subnet (deterministic scan
   of free host addresses). Re-pair of the same public key on the same interface
   keeps the existing address and refreshes the label. Duplicate labels are
@@ -213,16 +242,20 @@ moorlan://v1/unpair?url=http%3A%2F%2F<private-endpoint>%2Fv1%2Fpair&spk=<server-
 - Ephemeral pairing ports / automatic port selection
 - Writing peer config into wg-quick or networkd
 - Interface registration CLI (`--add-interface` / `--remove-interface`)
-- STUN, UPnP, relays, IPv6 tunnel address pools
+- UPnP, relays, IPv6 tunnel address pools
 - Interactive prompts
 - Offline client deletion queue
 - Long-running pair daemon
 - CLI overrides of site conf keys
+- ensureHost / unit+migrate on every day-to-day command (only `--setup`)
+- Self-updating binary download inside `--setup`
 
 ## 10. Failure and recovery
 
-- Missing `/etc/moorlan/moorlan.yaml` → error that names that path and the example
-  path to copy.
+- Missing `/etc/moorlan/moorlan.yaml` → error that names that path and suggests
+  `sudo moorlan --setup` (or re-run `install.sh`).
+- No enabled interfaces on `--pair` → error that suggests review YAML / `--setup`
+  / `install.sh`.
 - Missing, corrupt, or server-key-mismatched DB → refuse to operate on the
   affected interface(s). Operator path: remove peers if the DB still works, fix
   or replace the DB and YAML as needed, re-pair.
@@ -249,4 +282,6 @@ peers (
 ```
 
 No `metadata` table. No `pending_removals`. The same peer public key MAY exist on
-two interfaces. Address uniqueness is per interface.
+two interfaces. Address uniqueness is per interface. Schema creation/migrate runs
+during `--setup` (and whenever the DB is opened for peer ops, remaining additive
+and backward compatible).

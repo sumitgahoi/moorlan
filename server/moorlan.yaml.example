@@ -1,5 +1,4 @@
-# LAN address for pair/unpair (must be inside home-networks).
+# Minimal seed. Prefer: sudo moorlan --setup (or re-run install.sh).
+# After setup, set enabled: true on interfaces Moorlan should manage.
 private-endpoint: 10.10.10.1:8756
-
-# No managed WireGuard interfaces yet. Paste a stanza from the README when ready.
 interfaces: {}

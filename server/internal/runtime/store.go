@@ -29,6 +29,19 @@ CREATE TABLE IF NOT EXISTS peers (
   UNIQUE (interface, address)
 );`
 
+// MigrateStore opens (or creates) the peer database and applies additive schema
+// migrations, then closes it. Safe to call from --setup.
+func MigrateStore(path string) error {
+	if path == "" {
+		path = DefaultStorePath
+	}
+	store, err := openStore(path)
+	if err != nil {
+		return err
+	}
+	return store.db.Close()
+}
+
 // openStore opens or creates the host peer database.
 func openStore(path string) (*peerStore, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {

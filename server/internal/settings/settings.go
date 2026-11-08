@@ -1,10 +1,11 @@
-// Package settings loads host site settings from /etc/moorlan/moorlan.yaml.
+// Package settings loads and writes host site settings from /etc/moorlan/moorlan.yaml.
 // The file holds only static host parameters (not peers or device keys).
 package settings
 
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -29,6 +30,7 @@ type Site struct {
 // Name is the tunnel display name from YAML `name` (not the map key, which is
 // the WireGuard interface name).
 type Interface struct {
+	Enabled        bool
 	Name           string
 	PublicEndpoint string
 	HomeNetworks   []string
@@ -42,6 +44,7 @@ type file struct {
 }
 
 type ifaceFile struct {
+	Enabled        *bool    `yaml:"enabled"`
 	Name           string   `yaml:"name"`
 	PublicEndpoint string   `yaml:"public-endpoint"`
 	HomeNetworks   []string `yaml:"home-networks"`
@@ -50,15 +53,25 @@ type ifaceFile struct {
 }
 
 // Load reads and validates the site YAML. Missing file is an error that names
-// the expected path and the shipped example to copy.
+// the expected path and suggests --setup.
 func Load() (Site, error) {
 	raw, err := os.ReadFile(Path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return Site{}, fmt.Errorf("site conf %s not found; copy %s and edit it first", Path, ExamplePath)
+			return Site{}, fmt.Errorf("site conf %s not found; run: sudo moorlan --setup (or re-run install.sh); example: %s", Path, ExamplePath)
 		}
 		return Site{}, err
 	}
+	return parse(raw)
+}
+
+// Exists reports whether the site conf file is present.
+func Exists() bool {
+	_, err := os.Stat(Path)
+	return err == nil
+}
+
+func parse(raw []byte) (Site, error) {
 	var decoded file
 	dec := yaml.NewDecoder(strings.NewReader(string(raw)))
 	dec.KnownFields(true)
@@ -77,7 +90,11 @@ func Load() (Site, error) {
 		if name == "" {
 			return Site{}, fmt.Errorf("%s: interfaces contains an empty name", Path)
 		}
+		if cfg.Enabled == nil {
+			return Site{}, fmt.Errorf("%s: interfaces.%s.enabled is required", Path, name)
+		}
 		iface := Interface{
+			Enabled:        *cfg.Enabled,
 			Name:           strings.TrimSpace(cfg.Name),
 			PublicEndpoint: strings.TrimSpace(cfg.PublicEndpoint),
 			HomeNetworks:   trimList(cfg.HomeNetworks),
@@ -125,8 +142,139 @@ func (s Site) InterfaceNames() []string {
 	return names
 }
 
+// EnabledInterfaceNames returns names with enabled: true in stable order.
+func (s Site) EnabledInterfaceNames() []string {
+	var names []string
+	for _, name := range s.InterfaceNames() {
+		if s.Interfaces[name].Enabled {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
 // Lookup returns the YAML stanza for name, if present.
 func (s Site) Lookup(name string) (Interface, bool) {
 	iface, ok := s.Interfaces[name]
 	return iface, ok
+}
+
+// Merge combines guessed defaults with an existing site. Existing non-empty
+// strings/lists and existing enabled values win. New guessed ifaces are added.
+// Stanzas only in existing are kept.
+func Merge(existing, guessed Site) (Site, []string) {
+	var notes []string
+	out := Site{
+		PrivateEndpoint: guessed.PrivateEndpoint,
+		Interfaces:      map[string]Interface{},
+	}
+	if strings.TrimSpace(existing.PrivateEndpoint) != "" {
+		out.PrivateEndpoint = existing.PrivateEndpoint
+	}
+	seen := map[string]bool{}
+	for _, name := range existing.InterfaceNames() {
+		seen[name] = true
+		ex := existing.Interfaces[name]
+		if g, ok := guessed.Interfaces[name]; ok {
+			out.Interfaces[name] = mergeIface(ex, g)
+			continue
+		}
+		out.Interfaces[name] = ex
+		notes = append(notes, fmt.Sprintf("kept %s in conf (not seen on host)", name))
+	}
+	for _, name := range guessed.InterfaceNames() {
+		if seen[name] {
+			continue
+		}
+		out.Interfaces[name] = guessed.Interfaces[name]
+		notes = append(notes, fmt.Sprintf("added %s (enabled: false)", name))
+	}
+	return out, notes
+}
+
+func mergeIface(existing, guessed Interface) Interface {
+	out := guessed
+	out.Enabled = existing.Enabled
+	if strings.TrimSpace(existing.Name) != "" {
+		out.Name = existing.Name
+	}
+	if strings.TrimSpace(existing.PublicEndpoint) != "" {
+		out.PublicEndpoint = existing.PublicEndpoint
+	}
+	if len(existing.HomeNetworks) > 0 {
+		out.HomeNetworks = append([]string(nil), existing.HomeNetworks...)
+	}
+	if len(existing.DNSServers) > 0 {
+		out.DNSServers = append([]string(nil), existing.DNSServers...)
+	}
+	if len(existing.DNSSearch) > 0 {
+		out.DNSSearch = append([]string(nil), existing.DNSSearch...)
+	}
+	return out
+}
+
+// Write atomically writes site conf to Path.
+func Write(site Site) error {
+	if err := os.MkdirAll(filepath.Dir(Path), 0o755); err != nil {
+		return err
+	}
+	body, err := Encode(site)
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(Path), "moorlan.yaml.*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	ok := false
+	defer func() {
+		if !ok {
+			_ = os.Remove(tmpName)
+		}
+	}()
+	if _, err := tmp.Write(body); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(0o644); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, Path); err != nil {
+		return err
+	}
+	ok = true
+	return nil
+}
+
+// Encode marshals site conf to YAML bytes.
+func Encode(site Site) ([]byte, error) {
+	decoded := file{
+		PrivateEndpoint: site.PrivateEndpoint,
+		Interfaces:      map[string]ifaceFile{},
+	}
+	for _, name := range site.InterfaceNames() {
+		cfg := site.Interfaces[name]
+		en := cfg.Enabled
+		decoded.Interfaces[name] = ifaceFile{
+			Enabled:        &en,
+			Name:           cfg.Name,
+			PublicEndpoint: cfg.PublicEndpoint,
+			HomeNetworks:   append([]string(nil), cfg.HomeNetworks...),
+			DNSServers:     append([]string(nil), cfg.DNSServers...),
+			DNSSearch:      append([]string(nil), cfg.DNSSearch...),
+		}
+	}
+	var buf strings.Builder
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	if err := enc.Encode(decoded); err != nil {
+		return nil, err
+	}
+	_ = enc.Close()
+	return []byte(buf.String()), nil
 }

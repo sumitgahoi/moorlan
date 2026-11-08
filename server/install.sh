@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Install Moorlan server from the latest GitHub release.
+# Install or upgrade Moorlan server from the latest GitHub release.
+# Replaces the binary, then runs moorlan --setup (unit, DB, YAML merge).
 set -euo pipefail
 
 if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
@@ -21,21 +22,15 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
 curl -fsSL -o "$tmp/moorlan" "$base/moorlan-linux-${arch}"
-curl -fsSL -o "$tmp/moorlan.yaml.example" "$base/moorlan.yaml.example"
-curl -fsSL -o "$tmp/moorlan-reconcile.service" "$base/moorlan-reconcile.service"
-
 install -m 755 "$tmp/moorlan" /usr/local/bin/moorlan
 mkdir -p /usr/share/moorlan /etc/moorlan /var/lib/moorlan
-install -m 644 "$tmp/moorlan.yaml.example" /usr/share/moorlan/moorlan.yaml.example
-if [[ ! -e /etc/moorlan/moorlan.yaml ]]; then
-  cp /usr/share/moorlan/moorlan.yaml.example /etc/moorlan/moorlan.yaml
-  echo "wrote /etc/moorlan/moorlan.yaml (example values; edit before pairing)"
-else
-  echo "kept existing /etc/moorlan/moorlan.yaml"
-fi
-install -m 644 "$tmp/moorlan-reconcile.service" /etc/systemd/system/moorlan-reconcile.service
-systemctl daemon-reload
-systemctl enable --now moorlan-reconcile.service
 
-echo
-echo "Next: edit /etc/moorlan/moorlan.yaml, then: sudo moorlan --pair"
+if curl -fsSL -o "$tmp/moorlan.yaml.example" "$base/moorlan.yaml.example"; then
+  install -m 644 "$tmp/moorlan.yaml.example" /usr/share/moorlan/moorlan.yaml.example
+fi
+
+echo "moorlan: binary installed; running --setup"
+if ! /usr/local/bin/moorlan --setup; then
+  echo "moorlan: --setup failed (is WireGuard up?). Binary is installed; later run: sudo moorlan --setup" >&2
+  exit 0
+fi
