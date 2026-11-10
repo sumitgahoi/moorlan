@@ -498,7 +498,8 @@ final class TunnelManager: ObservableObject {
                         && manager.connection.status != .disconnecting
                         && manager.connection.status != .reasserting {
                 do {
-                    try manager.connection.startVPNTunnel()
+                    // Same recovery as wireguard-apple TunnelContainer.startActivation.
+                    try await startActivation()
                 } catch {
                     present(mapStartFailure(error))
                     status = .invalid
@@ -506,6 +507,38 @@ final class TunnelManager: ObservableObject {
                 }
             }
             refreshStatus()
+        }
+    }
+
+    /// Mirrors wireguard-apple `TunnelContainer.startActivation` (see
+    /// ARCHITECTURE.md “NetworkExtension reference implementations”):
+    /// if disabled (common after another VPN took the slot), re-enable + save and
+    /// recurse; on `configurationInvalid` / `configurationStale`, reload and recurse.
+    /// Caps at 8 attempts. Prefer WireGuard/Tailscale patterns over new recovery.
+    private func startActivation(recursionCount: UInt = 0) async throws {
+        if recursionCount >= 8 {
+            throw MoorlanError.vpnConfigurationFailed
+        }
+        guard let manager else {
+            throw MoorlanError.tunnelFailed("No VPN profile loaded")
+        }
+        if !manager.isEnabled {
+            manager.isEnabled = true
+            try await manager.moorlan_saveToPreferences()
+            try await startActivation(recursionCount: recursionCount + 1)
+            return
+        }
+        do {
+            try manager.connection.startVPNTunnel()
+        } catch {
+            let ns = error as NSError
+            guard ns.domain == NEVPNErrorDomain,
+                  let code = NEVPNError.Code(rawValue: ns.code),
+                  code == .configurationInvalid || code == .configurationStale else {
+                throw error
+            }
+            try await manager.moorlan_loadFromPreferences()
+            try await startActivation(recursionCount: recursionCount + 1)
         }
     }
 

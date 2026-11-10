@@ -101,6 +101,20 @@ reads `unpair_token`.
 If another VPN (e.g. Tailscale) supersedes Moorlan, surface a plain-English
 error (title + sentence + Retry). Only one VPN can be active at a time.
 
+### NetworkExtension reference implementations
+
+For `NETunnelProviderManager` / VPN start, stop, on-demand, disable-after-
+foreign-VPN, stale prefs, and related iOS VPN edge cases: **copy established
+fixes from WireGuard and Tailscale**. Do not invent alternate recovery.
+
+- **WireGuard (in-tree):** `ios/Vendor/wireguard-apple/` — especially
+  `TunnelsManager.swift` / `TunnelContainer.startActivation` (re-enable + save
+  when `isEnabled == false`; reload + retry only on `configurationInvalid` /
+  `configurationStale`; bounded recursion).
+- **Tailscale:** public issues and any available source for the same
+  NetworkExtension patterns (do not reinstall a profile that was merely
+  disabled by another VPN).
+
 ## 5. Storage
 
 | Store | Content |
