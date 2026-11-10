@@ -25,7 +25,9 @@ type Site struct {
 // Name is the tunnel display name from YAML `name` (not the map key, which is
 // the WireGuard interface name).
 //
-// Enabled is a pointer so omit ≠ false: nil means the key was not set.
+// Enabled is a pointer only so parse/merge can tell omit from an explicit
+// bool. Runtime treats solely enabled: true as on; nil, false, and missing
+// from YAML are all off.
 type Interface struct {
 	Enabled        *bool
 	Name           string
@@ -66,12 +68,30 @@ func (s Site) InterfaceNames() []string {
 	return names
 }
 
+// InterfaceEnabled reports whether name is listed with enabled: true.
+// Missing, enabled: false, and omitted enabled are all false.
+func (s Site) InterfaceEnabled(name string) bool {
+	iface, ok := s.Lookup(name)
+	return ok && iface.Enabled != nil && *iface.Enabled
+}
+
 // EnabledInterfaceNames returns names with enabled: true in stable order.
-// Nil or false enabled are skipped.
 func (s Site) EnabledInterfaceNames() []string {
 	var names []string
 	for _, name := range s.InterfaceNames() {
-		if e := s.Interfaces[name].Enabled; e != nil && *e {
+		if s.InterfaceEnabled(name) {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+// DisabledInterfaceNames returns listed names that are not enabled: true
+// (false or omitted) in stable order.
+func (s Site) DisabledInterfaceNames() []string {
+	var names []string
+	for _, name := range s.InterfaceNames() {
+		if !s.InterfaceEnabled(name) {
 			names = append(names, name)
 		}
 	}

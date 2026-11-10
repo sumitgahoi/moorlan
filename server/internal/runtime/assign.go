@@ -28,6 +28,7 @@ type Assigner struct {
 
 // OpenAssigner opens the peer database and binds this interface's server key.
 // It does not touch the live device; call Reconcile or mutate via Assign/Remove.
+// Callers MUST only open assigners for interfaces with enabled: true.
 func OpenAssigner(ctx context.Context, host Host) (*Assigner, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -57,8 +58,9 @@ func (a *Assigner) client() (wireguardClient, error) {
 	return wgctrl.New()
 }
 
-// Reconcile applies SQLite to the live device: ensure each DB peer is present
-// with correct AllowedIPs, then remove every live peer absent from the DB.
+// Reconcile is the single projection path (boot and after every DB mutation).
+// SQLite is the source of truth: install each DB peer, then remove every live
+// peer absent from the DB. Only called for enabled: true interfaces.
 func (a *Assigner) Reconcile(ctx context.Context) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()

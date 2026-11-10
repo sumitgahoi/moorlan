@@ -127,8 +127,8 @@ func (a *Assigner) removeManaged(ctx context.Context, client wireguardClient, pu
 		return err
 	}
 
-	// Always attempt reconcile so live catches up. Failure must not flip a
-	// DB-won remove into an API failure — next reconcile or boot clears orphans.
+	// Always reconcile after DB mutation. Failure must not flip a DB-won remove
+	// into an API failure — next reconcile or boot clears orphans.
 	if err := a.reconcile(ctx, client); err != nil {
 		log.Printf("moorlan: reconcile after removing peer %s: %v (database already updated; next reconcile will retry)", publicKey, err)
 	}

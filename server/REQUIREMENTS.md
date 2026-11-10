@@ -35,8 +35,10 @@ system for operators and engineers.
 
 Invariants:
 
-- YAML lists interfaces; only **`enabled: true`** interfaces are used for **new**
-  enroll. There is no separate registration CLI.
+- YAML lists interfaces; only **`enabled: true`** is on. Everything else
+  (`enabled: false`, omitted `enabled`, or absent from YAML) is off: no pair /
+  unpair / remove, no reconcile projection. There is no separate registration
+  CLI. `--list-peers` MAY still read the database for off interfaces.
 - Reconcile MUST project SQLite → live for each interface it reconciles:
   ensure each DB peer is present with correct AllowedIPs, then remove every live
   peer absent from the DB for that interface.
@@ -47,13 +49,21 @@ Invariants:
   interface name). It MUST NOT be updated. If the live WireGuard public key does
   not match the stored row, Moorlan MUST refuse to operate on that interface.
 
-### Interface disabled or removed from YAML
+### Interface not enabled (`enabled: true` only)
 
-- `--pair` for a disabled or absent interface MUST fail.
-- Existing peers in SQLite continue to work: reconcile still applies them; live
-  peers remain usable.
-- `--unpair`, `--remove`, and `--list-peers` MUST still work from the DB for that
-  interface.
+- Only `enabled: true` is on. `enabled: false`, omitted `enabled`, and absent
+  from YAML are all off: not reconciled, and not mutable.
+- `--pair`, `--unpair`, and `--remove` for an off interface MUST fail. Re-enable
+  the interface to revoke or enroll.
+- Boot `--reconcile`, and `--reconcile` with no interface, MUST only target
+  interfaces with `enabled: true`. `--reconcile --interface` for an off
+  interface MUST fail.
+- Peer rows for an off interface are inert paperweight in SQLite: they have no
+  live effect, are not projected on boot or reconcile, and are not mutable until
+  the interface is `enabled: true` again. Then a later reconcile (including the
+  next boot) applies them. A reboot while the interface stays off leaves the
+  device as the host brought it up: Moorlan peers are not reinstalled.
+- `--list-peers` MUST still read the database (including those inert rows).
 
 ## 4. Preconditions
 
@@ -62,8 +72,8 @@ Invariants:
   in a `/16`–`/30` prefix. Operators often start each device with zero peers;
   the server does not enforce a zero-peer check. Enabling an iface that already
   has live peers MAY strip those peers from the live device on reconcile (conf
-  files are untouched; `enabled: false` + restart WG from host conf restores
-  conf-backed peers).
+  files are untouched; `enabled: false` stops Moorlan from reapplying its own
+  peers, and restarting WG from host conf restores conf-backed peers).
 - Per interface, sticky `public-endpoint` (`host:port`) is required after setup.
   `--setup` MAY best-effort guess it via STUN (bound to the WG listen port), with
   a global unicast IPv4 + listen-port fallback. No UPnP or relays. Operators MAY
@@ -127,10 +137,10 @@ interface in stable name order.
 | --- | --- | --- |
 | `--setup` | In order: create/merge `/etc/moorlan/moorlan.yaml` (existing set fields win; new ifaces `enabled: false`); additive DB migrate; replace embedded systemd unit; `systemctl enable` (boot only — does **not** run reconcile); ask to review the YAML before `--pair` (does **not** dump conf contents). Binary placement is `install.sh` only. | YAML written; unit enabled |
 | `--pair [--interface <iface>]` | Interface MUST be listed and **`enabled: true`**. If exactly one enabled interface, `--interface` MAY be omitted; if more than one enabled, `--interface` is required. Reconcile that iface, print pair QR, serve HTTP on root `private-endpoint` | Session until idle/Ctrl-C; each enroll: DB committed and reconcile attempted |
-| `--unpair [--interface <iface>]` | Same selection among enabled YAML ifaces when listed; when the iface is absent/disabled in YAML but still has DB state, `--interface` is required. Reconcile, print unpair QR, DELETE-only HTTP server | Peer removed from DB → HTTP success; live MAY lag until next reconcile |
-| `--remove --interface <iface> --peer-public-key <key>` | Admin revoke by peer WireGuard public key (no QR). Works with DB state even if iface is absent/disabled in YAML | Same DB-first success as unpair |
+| `--unpair [--interface <iface>]` | Same selection as `--pair` (enabled YAML ifaces only). Reconcile, print unpair QR, DELETE-only HTTP server | Peer removed from DB → HTTP success; live MAY lag until next reconcile |
+| `--remove --interface <iface> --peer-public-key <key>` | Admin revoke by peer WireGuard public key (no QR). Interface MUST be `enabled: true` | Same DB-first success as unpair |
 | `--list-peers [--interface <iface>]` | Print label, public key, address from SQLite. Optional `--interface` filters; omit to list all | Read-only |
-| `--reconcile [--interface <iface>]` | With `--interface`: apply SQLite → live for that iface. Without: every **enabled** YAML iface **or** still has rows in `interfaces` / `peers`. Soft-fail per iface inside the run; process exits non-zero if any target failed so boot retries can continue | Each successful iface: live matches DB; overall process fails (retryable) if any target failed |
+| `--reconcile [--interface <iface>]` | With `--interface`: apply SQLite → live for that iface; the iface MUST be listed with `enabled: true`. Without: every **enabled** YAML iface. Soft-fail per iface inside the run; process exits non-zero if any target failed so boot retries can continue | Each successful iface: live matches DB; overall process fails (retryable) if any target failed |
 
 Bare `moorlan` (no mode flags) prints usage and exits non-zero (or zero on `-h`/`--help` only via flag help).
 
@@ -238,18 +248,21 @@ moorlan://v1/unpair?url=http%3A%2F%2F<private-endpoint>%2Fv1%2Fpair&spk=<server-
 
 ## 8. Reconcile
 
-- SQLite tables `interfaces` and `peers` are authoritative. There is **no**
-  `pending_removals` (or equivalent) deletion journal.
-- Per interface, reconcile order: ensure each DB peer is present on the live
+- There is **one** reconcile path. Boot (`moorlan --reconcile`) and every DB
+  mutation (enroll, unpair, `--remove`) invoke it. Mutations are only allowed on
+  `enabled: true` interfaces, so reconcile always projects for the iface it runs
+  on.
+- SQLite is the source of truth: ensure each DB peer is present on the live
   device with the correct AllowedIPs → remove every live peer absent from the DB
   for that interface.
+- SQLite tables `interfaces` and `peers` are authoritative. There is **no**
+  `pending_removals` (or equivalent) deletion journal.
 - Unpair / `--remove`: delete the peer row, then reconcile. If reconcile fails,
   the DB already won; the next reconcile or boot clears the live orphan.
-- `--pair` / `--unpair` / `--remove` reconcile around mutation. Boot runs
-  `moorlan --reconcile` via a single systemd oneshot with a bounded restart
-  window (~5 minutes) while WireGuard devices are not yet usable. Soft-fail per
-  interface inside the run; any failed iface makes the process exit non-zero so
-  systemd retries.
+- Boot runs `moorlan --reconcile` via a single systemd oneshot with a bounded
+  restart window (~5 minutes) while WireGuard devices are not yet usable.
+  Soft-fail per interface inside the run; any failed iface makes the process
+  exit non-zero so systemd retries. Only enabled interfaces are targeted.
 
 ## 9. Non-goals (v1)
 

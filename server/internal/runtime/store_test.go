@@ -110,17 +110,21 @@ func TestOpenAssignerRecreatesMissingDatabase(t *testing.T) {
 	}
 }
 
-func TestReconcileTargetsUnionAndFilter(t *testing.T) {
-	got, err := ReconcileTargets([]string{"wg1", "wg0"}, []string{"wg0", "wg2"}, "")
-	if err != nil || strings.Join(got, ",") != "wg0,wg1,wg2" {
+func TestReconcileTargetsEnabledOnly(t *testing.T) {
+	got, err := ReconcileTargets([]string{"wg1", "wg0"}, "")
+	if err != nil || strings.Join(got, ",") != "wg0,wg1" {
 		t.Fatalf("%v %v", got, err)
 	}
-	got, err = ReconcileTargets([]string{"wg0"}, []string{"wg2"}, "wg2")
-	if err != nil || len(got) != 1 || got[0] != "wg2" {
+	got, err = ReconcileTargets([]string{"wg0"}, "wg0")
+	if err != nil || len(got) != 1 || got[0] != "wg0" {
 		t.Fatalf("%v %v", got, err)
 	}
-	if _, err := ReconcileTargets([]string{"wg0"}, nil, "wg9"); err == nil {
-		t.Fatal("unknown filter accepted")
+	if _, err := ReconcileTargets([]string{"wg0"}, "wg9"); err == nil {
+		t.Fatal("missing/disabled filter accepted")
+	}
+	got, err = ReconcileTargets(nil, "")
+	if err != nil || len(got) != 0 {
+		t.Fatalf("empty enabled set: %v %v", got, err)
 	}
 }
 

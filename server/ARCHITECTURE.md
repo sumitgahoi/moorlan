@@ -96,11 +96,13 @@ sequenceDiagram
 
 ### Unpair / admin remove
 
-Unchanged: DB-backed revoke works if YAML iface is disabled or removed.
+Same enabled-iface gate as pair. Delete SQLite, then the same reconcile path as
+boot (DB → live).
 
 ### Reconcile / boot
 
-Target set: **enabled** YAML names ∪ DB names (optional `--interface` filter).
+One path: for each **`enabled: true`** YAML name (optional `--interface`
+filter), project SQLite → live. Off interfaces are never opened.
 
 ## 5. Persistence
 

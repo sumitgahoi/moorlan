@@ -92,7 +92,7 @@ system Camera app) and stay up for more devices until idle or Ctrl-C.
 | `--pair` / `--unpair` | Enrollment / unpair QR; idle-stop 2m |
 | `--list-peers` | Label, public key, address |
 | `--remove` | Admin revoke by peer public key |
-| `--reconcile` | SQLite → live (enabled YAML ∪ DB; also boot oneshot) |
+| `--reconcile` | SQLite → live for `enabled: true` YAML ifaces only (also boot oneshot) |
 
 ## Site conf
 
@@ -102,8 +102,10 @@ system Camera app) and stay up for more devices until idle or Ctrl-C.
 new enroll. Changes apply to **new** pair leases — re-pair phones to refresh
 existing ones.
 
-If you disable or remove an interface from YAML, new enroll fails for it;
-existing peers keep working and can still be unpaired.
+Only `enabled: true` is on. Pair, unpair, remove, and reconcile touch only those
+interfaces. Peers for off interfaces are inert paperweight in SQLite — no live
+effect until you re-enable and reconcile (or reboot). `--list-peers` still
+shows them.
 
 ## Notes
 

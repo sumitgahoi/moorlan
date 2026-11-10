@@ -138,6 +138,21 @@ interfaces:
 	if len(enabled) != 1 || enabled[0] != "wg0" {
 		t.Fatalf("%v", enabled)
 	}
+	disabled := got.DisabledInterfaceNames()
+	if len(disabled) != 1 || disabled[0] != "wg1" {
+		t.Fatalf("%v", disabled)
+	}
+	if !got.InterfaceEnabled("wg0") || got.InterfaceEnabled("wg1") || got.InterfaceEnabled("wg9") {
+		t.Fatal("InterfaceEnabled: only enabled: true is on")
+	}
+	got.Interfaces["wg2"] = Interface{Name: "Unset"}
+	if got.InterfaceEnabled("wg2") {
+		t.Fatal("omitted enabled must be off")
+	}
+	disabled = got.DisabledInterfaceNames()
+	if len(disabled) != 2 || disabled[0] != "wg1" || disabled[1] != "wg2" {
+		t.Fatalf("omitted enabled not in disabled set: %v", disabled)
+	}
 }
 
 func TestInterfaceNamesStableOrder(t *testing.T) {

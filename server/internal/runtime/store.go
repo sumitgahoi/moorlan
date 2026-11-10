@@ -238,47 +238,26 @@ func ListPeers(ctx context.Context, storePath, ifaceFilter string) ([]ListedPeer
 	return store.listAll(ctx, ifaceFilter)
 }
 
-// ListDBInterfaces returns interface names recorded in the database.
-// Missing database yields an empty list.
-func ListDBInterfaces(storePath string) ([]string, error) {
-	if _, err := os.Stat(storePath); err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	store, err := openStore(storePath)
-	if err != nil {
-		return nil, err
-	}
-	defer store.db.Close()
-	return store.interfaceNames(context.Background())
-}
-
 // ReconcileTargets returns the stable-ordered set of interfaces to reconcile:
-// YAML names ∪ DB names, optionally filtered to one interface.
-func ReconcileTargets(yamlNames, dbNames []string, ifaceFilter string) ([]string, error) {
+// only enabled YAML names. An interface that is enabled: false or missing from
+// YAML is not projected, even when it still has peer rows. An explicit filter
+// that is not enabled is an error.
+func ReconcileTargets(enabledNames []string, ifaceFilter string) ([]string, error) {
 	seen := map[string]bool{}
 	var out []string
-	add := func(name string) {
+	for _, name := range enabledNames {
 		if name == "" || seen[name] {
-			return
+			continue
 		}
 		seen[name] = true
 		out = append(out, name)
-	}
-	for _, name := range yamlNames {
-		add(name)
-	}
-	for _, name := range dbNames {
-		add(name)
 	}
 	sort.Strings(out)
 	if ifaceFilter == "" {
 		return out, nil
 	}
 	if !seen[ifaceFilter] {
-		return nil, fmt.Errorf("interface %s is not in site conf or the peer database", ifaceFilter)
+		return nil, fmt.Errorf("interface %s is not enabled in site conf", ifaceFilter)
 	}
 	return []string{ifaceFilter}, nil
 }

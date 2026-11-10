@@ -103,10 +103,10 @@ func run() error {
 		return runReconcile(ctx, site, storePath, *iface)
 	}
 	if *remove {
-		return runRemove(ctx, storePath, *iface, *peerPublicKey)
+		return runRemove(ctx, site, storePath, *iface, *peerPublicKey)
 	}
 
-	name, err := resolveSessionInterface(site, storePath, *iface, *unpair)
+	name, err := resolveSessionInterface(site, *iface)
 	if err != nil {
 		return err
 	}
@@ -123,9 +123,6 @@ func run() error {
 		cfg, ok := site.Lookup(name)
 		if !ok {
 			return fmt.Errorf("interface %s is not listed in %s", name, settings.Path)
-		}
-		if cfg.Enabled == nil || !*cfg.Enabled {
-			return fmt.Errorf("interface %s has enabled: false; set enabled: true in %s or run: sudo moorlan --setup", name, settings.Path)
 		}
 		host, err = runtime.Discover(name, storePath, site.PrivateEndpoint, cfg.HomeNetworks, cfg.PublicEndpoint, cfg.DNSServers, cfg.DNSSearch, cfg.Name)
 	}
@@ -217,55 +214,33 @@ func shortKey(key string) string {
 	return key[:4] + "…" + key[len(key)-4:]
 }
 
-func resolveSessionInterface(site settings.Site, storePath, ifaceFlag string, unpairOnly bool) (string, error) {
+func resolveSessionInterface(site settings.Site, ifaceFlag string) (string, error) {
 	enabledNames := site.EnabledInterfaceNames()
 	if ifaceFlag != "" {
-		if cfg, ok := site.Lookup(ifaceFlag); ok {
-			enabled := cfg.Enabled != nil && *cfg.Enabled
-			if !unpairOnly && !enabled {
-				return "", fmt.Errorf("interface %s has enabled: false; set enabled: true in %s", ifaceFlag, settings.Path)
-			}
-			if enabled || unpairOnly {
-				return ifaceFlag, nil
-			}
+		if site.InterfaceEnabled(ifaceFlag) {
+			return ifaceFlag, nil
 		}
-		if !unpairOnly {
-			return "", fmt.Errorf("interface %s is not listed in %s", ifaceFlag, settings.Path)
+		if _, ok := site.Lookup(ifaceFlag); ok {
+			return "", fmt.Errorf("interface %s is not enabled; set enabled: true in %s", ifaceFlag, settings.Path)
 		}
-		dbNames, err := runtime.ListDBInterfaces(storePath)
-		if err != nil {
-			return "", err
-		}
-		for _, name := range dbNames {
-			if name == ifaceFlag {
-				return ifaceFlag, nil
-			}
-		}
-		return "", fmt.Errorf("interface %s is not in %s or the peer database", ifaceFlag, settings.Path)
+		return "", fmt.Errorf("interface %s is not listed in %s", ifaceFlag, settings.Path)
 	}
 	if len(enabledNames) == 1 {
 		return enabledNames[0], nil
 	}
 	if len(enabledNames) == 0 {
-		if unpairOnly {
-			return "", fmt.Errorf("--interface is required when no enabled interfaces are listed in %s", settings.Path)
-		}
 		return "", fmt.Errorf("no enabled interfaces in %s; set enabled: true or run: sudo moorlan --setup", settings.Path)
 	}
 	return "", fmt.Errorf("--interface is required when multiple interfaces are enabled (%s)", strings.Join(enabledNames, ", "))
 }
 
 func runReconcile(ctx context.Context, site settings.Site, storePath, ifaceFlag string) error {
-	dbNames, err := runtime.ListDBInterfaces(storePath)
-	if err != nil {
-		return err
-	}
-	targets, err := runtime.ReconcileTargets(site.EnabledInterfaceNames(), dbNames, ifaceFlag)
+	targets, err := runtime.ReconcileTargets(site.EnabledInterfaceNames(), ifaceFlag)
 	if err != nil {
 		return err
 	}
 	if len(targets) == 0 {
-		fmt.Printf("nothing to reconcile (no enabled interfaces in %s or %s)\n", settings.Path, storePath)
+		fmt.Printf("nothing to reconcile (no enabled interfaces in %s)\n", settings.Path)
 		return nil
 	}
 	var failed int
@@ -306,7 +281,13 @@ func reconcileOne(ctx context.Context, storePath, name string) error {
 	return assigner.Reconcile(ctx)
 }
 
-func runRemove(ctx context.Context, storePath, iface, peerPublicKey string) error {
+func runRemove(ctx context.Context, site settings.Site, storePath, iface, peerPublicKey string) error {
+	if !site.InterfaceEnabled(iface) {
+		if _, ok := site.Lookup(iface); ok {
+			return fmt.Errorf("interface %s is not enabled; set enabled: true in %s", iface, settings.Path)
+		}
+		return fmt.Errorf("interface %s is not listed in %s", iface, settings.Path)
+	}
 	release, err := runtime.LockInterface(iface)
 	if err != nil {
 		return err
@@ -342,10 +323,8 @@ Install/upgrade: curl install.sh | sudo bash  (replaces binary, then --setup).
 --setup installs the reconcile unit, migrates the DB, and create/merges
 /etc/moorlan/moorlan.yaml (review and set enabled: true, then --pair).
 
---pair / --unpair print a QR on stdout and serve LAN HTTP until idle (2 minutes
-with no success) or Ctrl-C. Omit --interface when exactly one interface has
-enabled: true. --unpair also accepts --interface for a iface that still has
-peers in the DB after disable/removal from YAML. --remove always needs --interface.
+--pair / --unpair / --remove require enabled: true. Omit --interface when
+exactly one interface is enabled. --remove always needs --interface.
 
 Site conf: /etc/moorlan/moorlan.yaml. Peers: /var/lib/moorlan/moorlan.db.
 See server/README.md.
